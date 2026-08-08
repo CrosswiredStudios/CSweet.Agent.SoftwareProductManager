@@ -1149,6 +1149,25 @@ What level of prototype fidelity are we aiming for?
         Assert.Equal([firstStory.ItemId, firstTask.ItemId], ready.Select(x => x.ItemId).ToArray());
     }
 
+    [Fact]
+    public void ArchitectureAssignmentPool_PreservesExactHumanAndAgentPrincipals()
+    {
+        var humanId = Guid.NewGuid();
+        var agentId = Guid.NewGuid();
+        var installationId = Guid.NewGuid();
+
+        var pool = ProductManagerAgent.BuildArchitectureAssignmentPool(
+        [
+            new OrganizationPerson(humanId, "Human developer", "Human", null, null, null, true),
+            new OrganizationPerson(agentId, "Agent developer", "Agent", null, null, installationId, true)
+        ]);
+
+        Assert.Contains(pool, x => x.PrincipalKind == WorkOrchestrationPrincipalKinds.Human &&
+                                   x.OrganizationUserId == humanId && x.AgentInstallationId is null);
+        Assert.Contains(pool, x => x.PrincipalKind == WorkOrchestrationPrincipalKinds.AgentInstallation &&
+                                   x.AgentInstallationId == installationId && x.OrganizationUserId is null);
+    }
+
     [Theory]
     [InlineData(
         "I attempted to submit the team for approval, but the request was blocked by the platform.",

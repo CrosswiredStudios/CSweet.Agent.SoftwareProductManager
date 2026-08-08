@@ -707,8 +707,8 @@ Retry now. The ensure_software_team_board tool is required. Use its structured r
         var chat = await EnsureDeliveryChatAsync(
             team.Name, memberIds, context, cancellationToken);
         var architects = ActiveTeamAgentsForRole(team, organization, "Software Architect");
-        var developers = ActiveTeamAgentsForRole(team, organization, "Software Developer");
-        var quality = ActiveTeamAgentsForRole(team, organization, "Software QA");
+        var developers = ActiveTeamMembersForRole(team, organization, "Software Developer");
+        var quality = ActiveTeamMembersForRole(team, organization, "Software QA");
         var repositories = await context.Platform.Work.ListTeamRepositoryOptionsAsync(
             new TeamRepositoryOptionsRequest(teamId), cancellationToken);
         var repositoryPrompt = repositories.Count == 0
@@ -721,8 +721,8 @@ Retry now. The ensure_software_team_board tool is required. Use its structured r
             {
                 0 => "Delivery planning cannot start because the fully staffed team has no active Software Architect installation.",
                 > 1 => "Delivery planning cannot start because the team has multiple active Software Architects and no designated lead. Please designate one accountable Architect.",
-                _ when developers.Count == 0 => "Delivery planning cannot start because the fully staffed team has no active Software Developer installation.",
-                _ => "Delivery planning cannot start because the fully staffed team has no active Software QA installation."
+                _ when developers.Count == 0 => "Delivery planning cannot start because the fully staffed team has no active Software Developer.",
+                _ => "Delivery planning cannot start because the fully staffed team has no active Software QA."
             };
             _ = await context.Platform.Communication.SendMessageAsync(
                 chat.Id, blocker, $"software-team-planning-blocker:{request.Id:N}", cancellationToken);
@@ -786,6 +786,26 @@ If a product decision is missing, return exactly one focused blocker to me.
         return organization.People
             .Where(x => employeeIds.Contains(x.Id) && x.IsActive && x.AgentInstallationId.HasValue)
             .OrderBy(x => x.AgentInstallationId)
+            .ToList();
+    }
+
+    private static IReadOnlyList<OrganizationPerson> ActiveTeamMembersForRole(
+        AgentTeamContext team,
+        OrganizationSnapshotResponse organization,
+        string role)
+    {
+        var employeeIds = team.Members
+            .Where(x => !x.Presence.Equals("Inactive", StringComparison.OrdinalIgnoreCase) &&
+                        NormalizeRoleIdentity(x.TeamRole ?? x.CompanyRole ?? string.Empty) ==
+                        NormalizeRoleIdentity(role))
+            .Select(x => Guid.TryParse(x.EmployeeId, out var id) ? id : Guid.Empty)
+            .Where(x => x != Guid.Empty)
+            .ToHashSet();
+        return organization.People
+            .Where(x => employeeIds.Contains(x.Id) && x.IsActive &&
+                        (x.EmployeeType.Equals("Human", StringComparison.OrdinalIgnoreCase) ||
+                         x.AgentInstallationId.HasValue))
+            .OrderBy(x => x.Id)
             .ToList();
     }
 
@@ -867,19 +887,11 @@ If a product decision is missing, return exactly one focused blocker to me.
         if (architects.Count != 1)
             throw new InvalidOperationException(
                 "The team must have exactly one designated active Software Architect before publication.");
-        var developerInstallationIds = ActiveTeamAgentsForRole(
-                roster.Team, organization, "Software Developer")
-            .Select(x => x.AgentInstallationId!.Value)
-            .Distinct()
-            .OrderBy(x => x)
-            .ToList();
-        var qualityInstallationIds = ActiveTeamAgentsForRole(
-                roster.Team, organization, "Software QA")
-            .Select(x => x.AgentInstallationId!.Value)
-            .Distinct()
-            .OrderBy(x => x)
-            .ToList();
-        if (developerInstallationIds.Count == 0 || qualityInstallationIds.Count == 0)
+        var developerAssignments = BuildArchitectureAssignmentPool(
+            ActiveTeamMembersForRole(roster.Team, organization, "Software Developer"));
+        var qualityAssignments = BuildArchitectureAssignmentPool(
+            ActiveTeamMembersForRole(roster.Team, organization, "Software QA"));
+        if (developerAssignments.Count == 0 || qualityAssignments.Count == 0)
             throw new InvalidOperationException(
                 "The team requires at least one active Software Developer and one active Software QA before publication.");
 
@@ -909,10 +921,16 @@ If a product decision is missing, return exactly one focused blocker to me.
                 RepositoryId = repositoryId,
                 FirstSprintSequence = firstSprintSequence,
                 AccountableOrganizationUserId = self.Id,
-                DeveloperInstallationId = developerInstallationIds[0],
-                QualityInstallationId = qualityInstallationIds[0],
-                DeveloperInstallationIds = developerInstallationIds,
-                QualityInstallationIds = qualityInstallationIds
+                DeveloperInstallationId = developerAssignments
+                    .FirstOrDefault(x => x.AgentInstallationId.HasValue)?.AgentInstallationId ?? Guid.Empty,
+                QualityInstallationId = qualityAssignments
+                    .FirstOrDefault(x => x.AgentInstallationId.HasValue)?.AgentInstallationId ?? Guid.Empty,
+                DeveloperInstallationIds = developerAssignments
+                    .Where(x => x.AgentInstallationId.HasValue).Select(x => x.AgentInstallationId!.Value).ToList(),
+                QualityInstallationIds = qualityAssignments
+                    .Where(x => x.AgentInstallationId.HasValue).Select(x => x.AgentInstallationId!.Value).ToList(),
+                DeveloperAssignments = developerAssignments,
+                QualityAssignments = qualityAssignments
             },
             cancellationToken);
 
@@ -959,6 +977,19 @@ If a product decision is missing, return exactly one focused blocker to me.
             cancellationToken);
         return new GuardedArchitecturePublishResult(publication, readyTicketIds);
     }
+
+    internal static IReadOnlyList<ArchitectureAssignmentPrincipal> BuildArchitectureAssignmentPool(
+        IReadOnlyList<OrganizationPerson> members) =>
+        members.Select(member => member.EmployeeType.Equals("Human", StringComparison.OrdinalIgnoreCase)
+                ? new ArchitectureAssignmentPrincipal(
+                    WorkOrchestrationPrincipalKinds.Human,
+                    OrganizationUserId: member.Id)
+                : new ArchitectureAssignmentPrincipal(
+                    WorkOrchestrationPrincipalKinds.AgentInstallation,
+                    AgentInstallationId: member.AgentInstallationId))
+            .Distinct()
+            .OrderBy(x => $"{x.PrincipalKind}:{x.OrganizationUserId:D}:{x.AgentInstallationId:D}", StringComparer.Ordinal)
+            .ToList();
 
     private async Task NotifyDeliveryPlanningStatusAsync(
         string content,
@@ -1224,7 +1255,7 @@ If a product decision is missing, return exactly one focused blocker to me.
                 Column("Done"),
                 WorkMergeModes.ManagerApproval,
                 3,
-                $"product-team-board:{request.RequesterOrganizationUserId:N}:software-template:v2"),
+                $"product-team-board:{request.RequesterOrganizationUserId:N}:software-template:v3"),
             cancellationToken);
 
         var verified = await context.Platform.Work.ReadBoardAsync(board.Id, cancellationToken);

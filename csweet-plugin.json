@@ -3,7 +3,7 @@
   "kind": "agent",
   "id": "com.csweet.product-manager",
   "name": "C-Sweet Software Product Manager",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "publisher": {
     "id": "com.csweet",
     "name": "C-Sweet"

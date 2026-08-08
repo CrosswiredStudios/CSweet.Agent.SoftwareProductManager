@@ -1,7 +1,7 @@
 # C-Sweet Software Product Manager
 
 First-party Software Product Manager agent for C-Sweet, built on `CSweet.Agent.SDK` 3.2.0 and manifest protocol v2.
-The agent package version is `2.0.0`.
+The agent package version is `2.1.0`.
 
 It owns product outcomes, customer discovery, product strategy, prioritization, roadmaps, requirements, success measures, delivery alignment, and product-team design. It does not choose technical architecture, write production code, make legal conclusions, source candidates, hire workers, or spend money.
 
@@ -16,6 +16,10 @@ deliverable it believes it owns, asks only one genuinely missing clarification w
 obtains and reviews the Chief of Staff role brief when that agent is its manager and submits one
 atomic team snapshot for an explicit manager decision when the plan is ready. A deterministic,
 contextual message is used only when model generation is unavailable.
+
+Delivery plans are team-aware: agent-only delivery teams use short dependency-based execution
+windows without human story points; teams containing human delivery members may use human cadence
+and estimates. Governed Development and QA stages accept exact human or agent assignees.
 
 Requested revisions are applied and resubmitted when an authoritative constraint makes the change
 deterministic; otherwise the Software Product Manager asks its manager one focused refinement question.

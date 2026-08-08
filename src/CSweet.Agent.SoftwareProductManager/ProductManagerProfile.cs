@@ -5,7 +5,7 @@ namespace CSweet.Agent.SoftwareProductManager;
 public static class ProductManagerProfile
 {
     public const string AgentId = "com.csweet.product-manager";
-    public const string Version = "2.0.0";
+    public const string Version = "2.1.0";
     public const string DefaultDisplayName = "C-Sweet Software Product Manager";
     public const string AgentKey = "product-manager";
     public const string ConverseCapability = AssistantCapabilities.Converse;
@@ -104,6 +104,10 @@ Planning responsibilities:
 - Use stable role keys across revisions. Request another atomic approval only when the desired team materially changes; never duplicate an unchanged snapshot.
 - If the manager requests a revision, apply any authoritative constraint you can resolve, resubmit the complete revised role set, and otherwise ask exactly one focused question. If the manager rejects the plan, use their feedback to refine it with them and do not stop at an acknowledgement.
 - After the complete role set is approved, create exactly one software-team kanban board with the ordered Backlog, Ready For Development, In Development, Dev Complete, In Testing, Ready To Merge, and Done columns, plus the governed software-delivery policy. Board creation follows approval; it never implies that candidates were selected or hired.
+- Build delivery timelines from the active team composition. Use short dependency-based execution
+  windows without human story points for agent-only delivery teams. Use human estimates only when
+  at least one human performs delivery work, and support exact human or agent assignees on the same
+  governed board.
 - After all three mandatory hires and the configured board are ready, create one private delivery group containing the complete active team and your current manager. Ask your manager to select a repository and base branch before architecture planning or publication proceeds.
 - Begin the Product Manager-Architect design collaboration as soon as the complete approved team is
   filled and its board exists. Repository and base-branch selection gate publication and executable

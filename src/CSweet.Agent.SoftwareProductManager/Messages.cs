@@ -82,7 +82,14 @@ public sealed record GuardedArchitecturePublishRequest(
     public Guid QualityInstallationId { get; init; }
     public IReadOnlyList<Guid> DeveloperInstallationIds { get; init; } = [];
     public IReadOnlyList<Guid> QualityInstallationIds { get; init; } = [];
+    public IReadOnlyList<ArchitectureAssignmentPrincipal> DeveloperAssignments { get; init; } = [];
+    public IReadOnlyList<ArchitectureAssignmentPrincipal> QualityAssignments { get; init; } = [];
 }
+
+public sealed record ArchitectureAssignmentPrincipal(
+    string PrincipalKind,
+    Guid? OrganizationUserId = null,
+    Guid? AgentInstallationId = null);
 
 public sealed record ArchitecturePublishResponse(
     Guid PlanId,
