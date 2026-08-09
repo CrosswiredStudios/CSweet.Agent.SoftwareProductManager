@@ -5,7 +5,7 @@ of truth for installation authorization remains [`csweet-plugin.json`](csweet-pl
 catalog was last verified against package version `2.1.0` and manifest protocol `2.0`.
 
 Serialized capability names are sourced from the authoritative `CapabilityCatalog` in
-`CSweet.Agent.SDK` 3.2.0; manifest-audit tests reject names missing from that catalog.
+`CSweet.Agent.SDK` 3.4.0; manifest-audit tests reject names missing from that catalog.
 
 ## How to read this catalog
 

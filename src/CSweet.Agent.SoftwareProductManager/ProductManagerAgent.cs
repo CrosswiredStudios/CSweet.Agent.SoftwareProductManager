@@ -73,6 +73,37 @@ public sealed class ProductManagerAgent : CSweetAgentBase
                 defaultValue: "concise");
     }
 
+    public override async Task<PersonalTodoResult> HandlePersonalTodoAsync(
+        PersonalTodoItem item, AgentRuntimeContext context, CancellationToken cancellationToken)
+    {
+        var mentionContext = string.Join(", ", item.Mentions.Select(x =>
+            $"{x.DisplayName} ({x.EmployeeType}, organizationUserId={x.OrganizationUserId:D})"));
+        var response = await GenerateResponseAsync(
+            new AssistantCapabilityInput(
+                Settings.GetGuid("llmProviderId") ?? Guid.Empty,
+                (item.SourceConversationId ?? item.Id).ToString("D"),
+                $"""
+Execute this claimed personal task within your existing Product Manager role and granted model
+tools. Authoritative mentioned identities: {(string.IsNullOrEmpty(mentionContext) ? "none" : mentionContext)}
+
+Task: {item.Title}
+Details: {item.Description}
+
+All effects must use brokered actions. Return `BLOCKED: <durable reason>` if unsupported, impossible,
+or denied. Otherwise perform the task and return a concise completion summary.
+""",
+                new Dictionary<string, string>
+                {
+                    ["personalTodoItemId"] = item.Id.ToString("D"),
+                    ["sourceMessageId"] = item.SourceMessageId?.ToString("D") ?? string.Empty
+                },
+                MessageId: item.SourceMessageId ?? Guid.Empty),
+            ProductManagerProfile.ConverseCapability, context, cancellationToken);
+        return response.Response.StartsWith("BLOCKED:", StringComparison.OrdinalIgnoreCase)
+            ? PersonalTodoResult.Blocked(response.Response[8..].Trim())
+            : PersonalTodoResult.Completed(response.Response);
+    }
+
     public override async Task<AgentCoordinationTurnResult> HandleCoordinationTurnAsync(
         AgentCoordinationTurnRequest request,
         AgentRuntimeContext context,
