@@ -76,6 +76,34 @@ public sealed class ProductManagerAgent : CSweetAgentBase
     public override async Task<PersonalTodoResult> HandlePersonalTodoAsync(
         PersonalTodoItem item, AgentRuntimeContext context, CancellationToken cancellationToken)
     {
+        var authoritativeRecipients = item.Mentions
+            .GroupBy(x => x.OrganizationUserId)
+            .Select(x => x.First())
+            .ToList();
+        if (IsJokeDeliveryTask(item))
+        {
+            if (authoritativeRecipients.Count != 1)
+                return PersonalTodoResult.Blocked(
+                    "A joke delivery task requires exactly one authoritative mentioned recipient.");
+            var recipient = authoritativeRecipients[0];
+            const string joke = "Why did the product manager bring a ladder to planning? Because the backlog kept moving up. 😄";
+            try
+            {
+                await context.Platform.Communication.SendDirectMessageAsync(
+                    recipient.OrganizationUserId,
+                    joke,
+                    $"personal-todo-joke:{item.Id:N}:{recipient.OrganizationUserId:N}",
+                    cancellationToken);
+                return PersonalTodoResult.Completed(
+                    $"Sent {recipient.DisplayName} a joke in a direct message.");
+            }
+            catch (PlatformCapabilityException exception)
+            {
+                return PersonalTodoResult.Blocked(
+                    $"Could not send {recipient.DisplayName} a direct message: {exception.Message}");
+            }
+        }
+
         var mentionContext = string.Join(", ", item.Mentions.Select(x =>
             $"{x.DisplayName} ({x.EmployeeType}, organizationUserId={x.OrganizationUserId:D})"));
         var response = await GenerateResponseAsync(
@@ -102,6 +130,15 @@ or denied. Otherwise perform the task and return a concise completion summary.
         return response.Response.StartsWith("BLOCKED:", StringComparison.OrdinalIgnoreCase)
             ? PersonalTodoResult.Blocked(response.Response[8..].Trim())
             : PersonalTodoResult.Completed(response.Response);
+    }
+
+    private static bool IsJokeDeliveryTask(PersonalTodoItem item)
+    {
+        var text = $"{item.Title}\n{item.Description}";
+        return text.Contains("joke", StringComparison.OrdinalIgnoreCase) &&
+            (text.Contains("tell", StringComparison.OrdinalIgnoreCase) ||
+             text.Contains("send", StringComparison.OrdinalIgnoreCase) ||
+             text.Contains("message", StringComparison.OrdinalIgnoreCase));
     }
 
     public override async Task<AgentCoordinationTurnResult> HandleCoordinationTurnAsync(

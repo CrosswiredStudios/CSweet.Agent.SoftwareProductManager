@@ -103,7 +103,7 @@ public sealed class ProductManagerProfileTests
             "src",
             "CSweet.Agent.SoftwareProductManager",
             "CSweet.Agent.SoftwareProductManager.csproj"));
-        Assert.Contains("CSweet.Agent.SDK\" Version=\"3.4.0", project, StringComparison.Ordinal);
+        Assert.Contains("CSweet.Agent.SDK\" Version=\"3.6.0", project, StringComparison.Ordinal);
         Assert.Contains("<ProjectReference", project, StringComparison.Ordinal);
         Assert.Contains($"<Version>{ProductManagerProfile.Version}</Version>", project, StringComparison.Ordinal);
     }
@@ -140,6 +140,49 @@ public sealed class ProductManagerProfileTests
         Assert.Contains("until genuinely blocked", ProductManagerProfile.SystemPrompt, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("one consolidated response", ProductManagerProfile.SystemPrompt, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("product definition", ProductManagerProfile.SystemPrompt, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task PersonalTodo_JokeMentionSendsBrokeredDirectMessageAndCompletes()
+    {
+        var recipientId = Guid.NewGuid();
+        CommunicationSendCapture? sent = null;
+        var chatId = Guid.NewGuid();
+        var runtime = new AgentTestRuntime()
+            .RegisterCapability<CreateCommunicationChat, CommunicationAction>(
+                CommunicationCapabilities.ChatCreate,
+                (request, _) => Task.FromResult(new CommunicationAction(
+                    true, null, "Created",
+                    new CommunicationChat(chatId, "Matt", request.Description,
+                        true, true, false, true, DateTimeOffset.UtcNow,
+                        [new CommunicationParticipant(recipientId, "Matt", "Human", "CEO")],
+                        null, null, 0))))
+            .RegisterCapability<CommunicationSendCapture, CommunicationMessage>(
+                CommunicationCapabilities.MessageSend,
+                (request, _) =>
+                {
+                    sent = request;
+                    return Task.FromResult(SentMessage(request));
+                });
+        var agent = new ProductManagerAgent(
+            NullLogger<ProductManagerAgent>.Instance,
+            new ProductManagerOrchestrator(NullLogger<ProductManagerOrchestrator>.Instance));
+        var ownerId = Guid.NewGuid();
+        var item = new PersonalTodoItem(
+            Guid.NewGuid(), Guid.NewGuid(), ownerId, ownerId, "Matt",
+            "Tell @Matt a joke", "Send a joke to Matt through a message",
+            PersonalTodoStatuses.Running, WorkPriorities.Critical, 1024, 2,
+            null, null, null,
+            [new PersonalTodoMention(recipientId, "Matt", "Human")],
+            null, null, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
+
+        var result = await agent.HandlePersonalTodoAsync(
+            item, runtime.CreateContext(), CancellationToken.None);
+
+        Assert.NotNull(result);
+        Assert.NotNull(sent);
+        Assert.Equal(chatId, sent.ChatId);
+        Assert.Contains("backlog", sent.Content, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
