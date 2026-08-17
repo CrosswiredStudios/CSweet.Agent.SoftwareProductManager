@@ -76,6 +76,7 @@ public sealed record GuardedArchitecturePublishRequest(
     string IdempotencyKey)
 {
     public Guid RepositoryId { get; init; }
+    public string BaseBranch { get; init; } = string.Empty;
     public int FirstSprintSequence { get; init; }
     public Guid AccountableOrganizationUserId { get; init; }
     public Guid DeveloperInstallationId { get; init; }
@@ -96,7 +97,10 @@ public sealed record ArchitecturePublishResponse(
     Guid EpicId,
     IReadOnlyList<PublishedArchitectureSprint> Sprints,
     IReadOnlyList<PublishedArchitectureTicket> Tickets,
-    DateTimeOffset PublishedAt);
+    DateTimeOffset PublishedAt)
+{
+    public bool DeliveryFinalized { get; init; }
+}
 
 public sealed record PublishedArchitectureSprint(int Ordinal, Guid SprintId, string Name);
 public sealed record PublishedArchitectureTicket(string Key, Guid ItemId, Guid SprintId, string Kind);

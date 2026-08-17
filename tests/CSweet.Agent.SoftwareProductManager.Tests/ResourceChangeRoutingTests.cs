@@ -131,7 +131,7 @@ public sealed class ResourceChangeRoutingTests
 
         await fixture.SubmitAsync(teamName: new string('T', 200));
 
-        Assert.Equal(160, fixture.Proposal!.TeamName!.Length);
+        Assert.Equal("First Playable Browser Game", fixture.Proposal!.TeamName);
         Assert.Equal("product-team:", fixture.Proposal.TeamKey![..13]);
     }
 

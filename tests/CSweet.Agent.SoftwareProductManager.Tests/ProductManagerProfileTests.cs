@@ -10,6 +10,17 @@ namespace CSweet.Agent.SoftwareProductManager.Tests;
 public sealed class ProductManagerProfileTests
 {
     [Fact]
+    public void TeamName_DerivesConciseProductIdentityFromLongGoal()
+    {
+        var name = ProductManagerAgent.DeriveConciseTeamName(
+            "Deliver a Babylon.js PoC of a Starfox 64-style web-based 3D space shooter demonstrating core flight feel.");
+
+        Assert.Equal("Starfox PoC", name);
+        Assert.True(name.Split(' ').Length <= 6);
+        Assert.True(name.Length <= 48);
+    }
+
+    [Fact]
     public void Manifest_UsesProductIdentityAndLeastPrivilegeCoordination()
     {
         using var document = JsonDocument.Parse(File.ReadAllText(ManifestPath()));
@@ -103,7 +114,7 @@ public sealed class ProductManagerProfileTests
             "src",
             "CSweet.Agent.SoftwareProductManager",
             "CSweet.Agent.SoftwareProductManager.csproj"));
-        Assert.Contains("CSweet.Agent.SDK\" Version=\"3.6.0", project, StringComparison.Ordinal);
+        Assert.Contains("CSweet.Agent.SDK\" Version=\"3.9.0", project, StringComparison.Ordinal);
         Assert.Contains("<ProjectReference", project, StringComparison.Ordinal);
         Assert.Contains($"<Version>{ProductManagerProfile.Version}</Version>", project, StringComparison.Ordinal);
     }
@@ -654,7 +665,7 @@ What level of prototype fidelity are we aiming for?
     {
         var name = ProductManagerAgent.BuildProductBoardName(new string('x', 300));
 
-        Assert.EndsWith(" - Product Team", name, StringComparison.Ordinal);
+        Assert.Equal("Product Team", name);
         Assert.True(name.Length <= 160);
     }
 
@@ -985,7 +996,7 @@ What level of prototype fidelity are we aiming for?
         Assert.Equal(response.ConversationId, messageRequest.ChatId);
         Assert.Equal($"hiring-recommendation-fulfilled:{ownEvent.EventId:N}:product-manager", messageRequest.IdempotencyKey);
         Assert.Contains("Product Engineer", messageRequest.Content, StringComparison.Ordinal);
-        Assert.Contains("covers every planned role", messageRequest.Content, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Remaining: None", messageRequest.Content, StringComparison.OrdinalIgnoreCase);
         Assert.Equal(2, messageRequests.Count);
         Assert.Single(messageRequests.Select(request => request.IdempotencyKey).Distinct(StringComparer.Ordinal));
     }
@@ -1064,6 +1075,7 @@ What level of prototype fidelity are we aiming for?
         };
         var messages = new List<CommunicationSendCapture>();
         var createdChats = new List<CreateCommunicationChat>();
+        var coordinationRequests = new List<StartAgentCoordinationRequest>();
         var runtime = new AgentTestRuntime()
             .RegisterCapability<ResourceChangeReadRequest, ResourceChangeReadResponse>(
                 PlatformCapabilities.ResourceChangeRead,
@@ -1114,6 +1126,22 @@ What level of prototype fidelity are we aiming for?
                     messages.Add(request);
                     return Task.FromResult(SentMessage(request) with { ChatTurnId = Guid.NewGuid() });
                 })
+            .RegisterCapability<StartAgentCoordinationRequest, AgentCoordinationSession>(
+                CommunicationCapabilities.CoordinationStart,
+                (request, _) =>
+                {
+                    coordinationRequests.Add(request);
+                    return Task.FromResult(new AgentCoordinationSession(
+                        Guid.NewGuid(), request.SourceConversationId, request.SourceConversationId,
+                        request.SourceChatTurnId, request.SourceMessageId,
+                        new AgentCoordinationParticipant(productManagerId, productManagerInstallationId,
+                            "Product Manager", "Software Product Manager"),
+                        new AgentCoordinationParticipant(architectId, architectInstallationId,
+                            "Architect", "Software Architect"),
+                        request.Subject, request.Objective, request.SuccessCriteria,
+                        AgentCoordinationStatuses.Active, 1, 1, architectId, false, null,
+                        DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, []));
+                })
             .RegisterCapability<TeamRepositoryOptionsRequest, IReadOnlyList<TeamRepositoryOption>>(
                 SourceControlCapabilities.TeamRepositoryOptions,
                 (_, _) => Task.FromResult<IReadOnlyList<TeamRepositoryOption>>([]));
@@ -1136,6 +1164,10 @@ What level of prototype fidelity are we aiming for?
         Assert.Contains(messages, x => x.IdempotencyKey == $"software-team-kickoff:{requestId:N}");
         Assert.Contains(messages, x => x.Content.Contains("planning has started", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(createdChats, x => x.IsDirect && x.ParticipantOrganizationUserIds.SequenceEqual([architectId]));
+        Assert.Equal(2, coordinationRequests.Count);
+        Assert.Single(coordinationRequests.Select(x => x.IdempotencyKey).Distinct(StringComparer.Ordinal));
+        Assert.All(coordinationRequests, x =>
+            Assert.Equal($"software-team-planning:{requestId:N}", x.IdempotencyKey));
     }
 
     [Fact]
