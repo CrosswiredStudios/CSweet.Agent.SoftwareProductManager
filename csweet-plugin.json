@@ -3,7 +3,7 @@
   "kind": "agent",
   "id": "com.csweet.product-manager",
   "name": "C-Sweet Software Product Manager",
-  "version": "2.3.1",
+  "version": "2.4.0",
   "publisher": {
     "id": "com.csweet",
     "name": "C-Sweet"
@@ -554,9 +554,9 @@
     { "name": "work.orchestration.software-template.configure", "scope": "team", "purpose": "Publish the bounded software delivery policy for the approved team board" },
     { "name": "source-control.repository.team-options.v2", "scope": "team", "purpose": "Present only code projects enabled by the current team's delivery policy" },
     { "name": "source-control.repository.provision.v2", "scope": "organization", "purpose": "Request one policy-bounded private Managed GitHub project when explicitly granted" },
-    { "name": "management.product-role-brief.v1", "scope": "organization", "purpose": "Request an authoritative role brief from the active Chief of Staff" },
-    { "name": "management.product-plan.review.v1", "scope": "organization", "purpose": "Submit the initial product and product-team recommendation to the Chief of Staff" },
-    { "name": "management.product-escalation.v1", "scope": "organization", "purpose": "Route executive information gaps and decisions through the Chief of Staff" },
+    { "name": "management.product-role-brief.v1", "scope": "organization", "purpose": "Request an authoritative role brief from the active Chief of Staff sharing the CEO manager" },
+    { "name": "management.product-plan.review.v1", "scope": "organization", "purpose": "Submit the initial product and product-team recommendation to the CEO-peer Chief of Staff for reconciliation" },
+    { "name": "management.product-escalation.v1", "scope": "organization", "purpose": "Route executive information gaps and decisions through the CEO-peer Chief of Staff liaison" },
     { "name": "software-architecture.design.v1", "scope": "organization", "purpose": "Request a typed read-only system design and incremental implementation plan from the bound Software Architect" },
     { "name": "software-architecture.publish-plan.v1", "scope": "organization", "purpose": "Publish the complete Software Product Manager-approved architecture plan as planned sprints and developer-ready tickets" }
   ],

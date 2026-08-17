@@ -2,7 +2,7 @@
 
 This document is the human-readable grant catalog for the C-Sweet Software Product Manager agent. The source
 of truth for installation authorization remains [`csweet-plugin.json`](csweet-plugin.json). This
-catalog was last verified against package version `2.1.0` and manifest protocol `2.0`.
+catalog was last verified against package version `2.4.0` and manifest protocol `2.0`.
 
 Serialized capability names are sourced from the authoritative `CapabilityCatalog` in
 `CSweet.Agent.SDK` 3.6.0; manifest-audit tests reject names missing from that catalog.
@@ -75,11 +75,9 @@ policy at runtime.
 | `source-control.repository.team-options.v2` | team | List only code projects enabled by the current team's delivery policy. |
 | `source-control.repository.provision.v2` | organization | Request one policy-bounded private Managed GitHub project without receiving provider credentials. |
 
-The manager is resolved from the authoritative organization snapshot and may be the CEO, Chief of
-Staff, another human employee, or another agent. A finalized team created while another executive
-is speaking with the Software Product Manager is routed into the protected manager conversation. Agent
-managers receive the atomic request without borrowing the executive's chat turn; human managers
-must review it from their own direct conversation.
+The Product Manager's manager is the CEO resolved from the authoritative organization snapshot.
+A finalized team created outside that reporting conversation is routed into the protected CEO
+conversation, and the human CEO must review it from that direct conversation.
 
 ### Chief of Staff coordination
 
@@ -89,8 +87,8 @@ must review it from their own direct conversation.
 | `management.product-plan.review.v1` | organization | Chief of Staff | Submit product strategy and product-team recommendations for company-level reconciliation. |
 | `management.product-escalation.v1` | organization | Chief of Staff | Route executive information gaps and decisions through the Chief's CEO workflow. |
 
-These capabilities supplement direct manager messaging only when the current manager is the Chief
-of Staff. Calls target that manager's exact installation and validate the reporting relationship.
+These capabilities supplement direct CEO messaging when an active Chief of Staff shares the same
+CEO manager. Calls target that Chief's exact installation and validate the CEO-peer relationship.
 
 ### Software Architect coordination
 
@@ -121,7 +119,7 @@ capability authorizes board mutations.
 | Capability | Consumer | Feature |
 |---|---|---|
 | `product-management.plan.v1` | Chief of Staff | Produce a structured product and product-organization recommendation. |
-| `product-management.context.update.v1` | Chief of Staff | Accept an idempotent role or context refresh and report readiness. |
+| `product-management.context.update.v1` | Chief of Staff | Accept an idempotent role or context refresh, report readiness, and route a ready plan to the CEO conversation for direct instruction. |
 
 ## Deliberately excluded grants
 
@@ -134,8 +132,8 @@ The Software Product Manager recommends product roles, reporting lines, and hiri
 - approval proposal grants
 - finance-profile update grants
 
-Those company-wide organization, hiring, spending, and approval responsibilities remain with the
-Chief of Staff or another authorized managing employee.
+The Chief of Staff administratively maintains candidate-free suggestions after the CEO approves a
+lead-authored team plan. The CEO retains organization, hiring, spending, and approval authority.
 
 ## Security boundary
 

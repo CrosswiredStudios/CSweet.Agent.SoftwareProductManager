@@ -115,13 +115,15 @@ public sealed class ProductManagerProfileTests
         Assert.Contains("roadmap", ProductManagerProfile.SystemPrompt, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("success measures", ProductManagerProfile.SystemPrompt, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("at most two", ProductManagerProfile.SystemPrompt, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("directly message your managing employee", ProductManagerProfile.SystemPrompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("directly message your CEO manager", ProductManagerProfile.SystemPrompt, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("approved organization and relationship memory", ProductManagerProfile.SystemPrompt, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Never open with a generic readiness message", ProductManagerProfile.SystemPrompt, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("CEO, Chief of Staff, another human, or another agent", ProductManagerProfile.SystemPrompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Chief of Staff is your executive liaison, not your line manager", ProductManagerProfile.SystemPrompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("shares your CEO manager", ProductManagerProfile.SystemPrompt, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Never maintain the Chief's hiring backlog", ProductManagerProfile.SystemPrompt, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Do not present a finalized role list", ProductManagerProfile.SystemPrompt, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("routes the request to your authoritative manager", ProductManagerProfile.SystemPrompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("routes the request to your authoritative CEO manager", ProductManagerProfile.SystemPrompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("a Chief-triggered update is not manager authorization", ProductManagerProfile.SystemPrompt, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Do not provide technical architecture", ProductManagerProfile.SystemPrompt, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("primary startup goal", ProductManagerProfile.SystemPrompt, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("kanban board", ProductManagerProfile.SystemPrompt, StringComparison.OrdinalIgnoreCase);
@@ -140,6 +142,43 @@ public sealed class ProductManagerProfileTests
         Assert.Contains("until genuinely blocked", ProductManagerProfile.SystemPrompt, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("one consolidated response", ProductManagerProfile.SystemPrompt, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("product definition", ProductManagerProfile.SystemPrompt, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ChiefLiaison_RequiresAnActiveAgentSharingTheHumanCeo()
+    {
+        var ceoId = Guid.NewGuid();
+        var otherCeoId = Guid.NewGuid();
+        var productManager = new OrganizationPerson(
+            Guid.NewGuid(), "Product Manager", "Agent", null, ceoId, Guid.NewGuid(), true);
+        var chief = new OrganizationPerson(
+            Guid.NewGuid(), "Chief of Staff", "Agent", null, ceoId, Guid.NewGuid(), true);
+        var unrelatedChief = new OrganizationPerson(
+            Guid.NewGuid(), "Chief of Staff West", "Agent", null, otherCeoId, Guid.NewGuid(), true);
+        var organization = new OrganizationSnapshotResponse(
+            Guid.NewGuid(),
+            "Active",
+            [
+                productManager,
+                chief,
+                unrelatedChief,
+                new OrganizationPerson(ceoId, "CEO", "Human", null, null, null, true),
+                new OrganizationPerson(otherCeoId, "Other CEO", "Human", null, null, null, true)
+            ],
+            [], [], [], [], DateTimeOffset.UtcNow);
+
+        Assert.Equal(chief.Id, ProductManagerAgent.FindChiefLiaison(productManager, organization)?.Id);
+        Assert.Equal(ceoId, ProductManagerAgent.FindCeoManager(productManager, organization)?.Id);
+        Assert.Null(ProductManagerAgent.FindChiefLiaison(
+            productManager with { ReportsToId = Guid.NewGuid() }, organization));
+        Assert.Null(ProductManagerAgent.FindCeoManager(
+            productManager with { ReportsToId = chief.Id }, organization));
+        Assert.Null(ProductManagerAgent.FindChiefLiaison(
+            productManager,
+            organization with
+            {
+                People = organization.People.Where(person => person.Id != chief.Id).ToList()
+            }));
     }
 
     [Fact]
@@ -1296,6 +1335,24 @@ What level of prototype fidelity are we aiming for?
         Assert.False(waiting.PlanRefreshRequired);
         Assert.Equal("Ready", ready.State);
         Assert.True(ready.PlanRefreshRequired);
+    }
+
+    [Fact]
+    public void RefreshedTeamPlan_RoutesBackToTheCeoForADirectApprovalTurn()
+    {
+        var plan = new ProductPlanResponse(
+            "Ship the first validated release",
+            [], [], [], [], [], [], [], [],
+            4,
+            DateTimeOffset.UtcNow);
+
+        var message = ProductManagerAgent.BuildCeoTeamReviewRequest(plan, "refreshed");
+
+        Assert.Contains("Product Manager-authored team design", message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("reconciled it with the Chief of Staff", message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("you are the CEO and approval authority", message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("your direct instruction in this conversation", message, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("submitted", message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

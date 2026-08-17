@@ -594,7 +594,7 @@ Retry now. The ensure_software_team_board tool is required. Use its structured r
                     planRequest.RoleBrief,
                     context,
                     cancellationToken))
-                return AgentWorkResult.Failure("Only the active reporting Chief of Staff may request a product plan.");
+                return AgentWorkResult.Failure("Only the active Chief of Staff sharing this Product Manager's CEO manager may request a product plan.");
 
             var operatingContext = await _orchestrator.AssembleContextAsync(
                 context,
@@ -614,11 +614,11 @@ Retry now. The ensure_software_team_board tool is required. Use its structured r
                     update.RoleBrief,
                     context,
                     cancellationToken))
-                return AgentWorkResult.Failure("Only the active reporting Chief of Staff may update product context.");
+                return AgentWorkResult.Failure("Only the active Chief of Staff sharing this Product Manager's CEO manager may update product context.");
 
             var response = ProductManagerOrchestrator.BuildContextUpdateResponse(update);
             if (response.PlanRefreshRequired)
-                await SubmitContextUpdateTeamPlanAsync(update, context, cancellationToken);
+                await RouteContextUpdatePlanToCeoAsync(update, context, cancellationToken);
             return new AgentWorkResult(true, SerializePayload(response));
         }
 
@@ -1404,13 +1404,9 @@ If a product decision is missing, return exactly one focused blocker to me.
             x.AgentInstallationId == installationId);
         if (self is null)
             throw new InvalidOperationException("The onboarding employee does not match this Software Product Manager installation.");
-        var manager = self.ReportsToId.HasValue
-            ? organization.People.SingleOrDefault(x =>
-                x.Id == self.ReportsToId.Value &&
-                x.IsActive)
-            : null;
+        var manager = FindCeoManager(self, organization);
         if (manager is null)
-            throw new InvalidOperationException("The Software Product Manager must report to an active managing employee.");
+            throw new InvalidOperationException("The Software Product Manager must report directly to an active human CEO.");
 
         var managerConversationId = onboarding.HiringOrganizationUserId == manager.Id
             ? onboarding.ConversationId
@@ -1428,12 +1424,13 @@ If a product decision is missing, return exactly one focused blocker to me.
             message.EventId.ToString("N"),
             cancellationToken);
 
-        if (manager.AgentInstallationId.HasValue && IsChiefManager(manager, organization))
+        var chiefLiaison = FindChiefLiaison(self, organization);
+        if (chiefLiaison?.AgentInstallationId is not null)
         {
             await CoordinateWithChiefAsync(
                 self,
                 installationId,
-                manager,
+                chiefLiaison,
                 managerConversationId,
                 eventId,
                 operatingContext,
@@ -1565,21 +1562,53 @@ If the context is not sufficient to identify the deliverable responsibly, state 
         return fallback;
     }
 
-    private static bool IsChiefManager(
-        OrganizationPerson manager,
+    private static bool IsChiefOfStaff(
+        OrganizationPerson person,
         OrganizationSnapshotResponse organization)
     {
-        var roleName = manager.RoleId.HasValue
-            ? organization.Roles.SingleOrDefault(x => x.Id == manager.RoleId.Value)?.Name
+        var roleName = person.RoleId.HasValue
+            ? organization.Roles.SingleOrDefault(x => x.Id == person.RoleId.Value)?.Name
             : null;
-        return manager.DisplayName.Contains("Chief of Staff", StringComparison.OrdinalIgnoreCase) ||
+        return person.DisplayName.Contains("Chief of Staff", StringComparison.OrdinalIgnoreCase) ||
                (roleName?.Contains("Chief of Staff", StringComparison.OrdinalIgnoreCase) ?? false);
+    }
+
+    internal static OrganizationPerson? FindCeoManager(
+        OrganizationPerson productManager,
+        OrganizationSnapshotResponse organization)
+    {
+        if (!productManager.IsActive || productManager.ReportsToId is not { } ceoId)
+            return null;
+        return organization.People.SingleOrDefault(person =>
+            person.Id == ceoId &&
+            person.IsActive &&
+            person.EmployeeType.Equals("Human", StringComparison.OrdinalIgnoreCase));
+    }
+
+    internal static OrganizationPerson? FindChiefLiaison(
+        OrganizationPerson productManager,
+        OrganizationSnapshotResponse organization)
+    {
+        var ceo = FindCeoManager(productManager, organization);
+        if (ceo is null) return null;
+        var ceoId = ceo.Id;
+
+        return organization.People
+            .Where(person =>
+                person.Id != productManager.Id &&
+                person.IsActive &&
+                person.ReportsToId == ceoId &&
+                person.AgentInstallationId.HasValue &&
+                person.EmployeeType.Equals("Agent", StringComparison.OrdinalIgnoreCase) &&
+                IsChiefOfStaff(person, organization))
+            .OrderBy(person => person.DisplayName)
+            .FirstOrDefault();
     }
 
     private static async Task CoordinateWithChiefAsync(
         OrganizationPerson self,
         Guid installationId,
-        OrganizationPerson manager,
+        OrganizationPerson chief,
         Guid managerConversationId,
         Guid eventId,
         ProductOperatingContext operatingContext,
@@ -1594,14 +1623,14 @@ If the context is not sufficient to identify the deliverable responsibly, state 
             $"product-onboarding-role-brief:{eventId:D}");
         var roleBrief = await InvokeCoordinationAsync<ProductRoleBriefRequest, ProductRoleBriefResponse>(
             context,
-            manager.AgentInstallationId!.Value,
+            chief.AgentInstallationId!.Value,
             ProductManagementCapabilities.RoleBrief,
             roleBriefRequest,
             correlationId,
             cancellationToken);
-        if (roleBrief.ChiefOrganizationUserId != manager.Id ||
+        if (roleBrief.ChiefOrganizationUserId != chief.Id ||
             roleBrief.ProductManagerOrganizationUserId != self.Id)
-            throw new InvalidOperationException("The Chief returned a role brief for a different reporting relationship.");
+            throw new InvalidOperationException("The Chief returned a role brief for a different CEO-peer liaison relationship.");
 
         if (roleBrief.MissingInformation.Count > 0 ||
             roleBrief.Status.Equals("AwaitingExecutiveInput", StringComparison.OrdinalIgnoreCase))
@@ -1610,7 +1639,7 @@ If the context is not sufficient to identify the deliverable responsibly, state 
                 ?? throw new InvalidOperationException("The Chief returned an incomplete role brief without an executive information gap.");
             var escalation = await InvokeCoordinationAsync<ProductEscalationRequest, ProductEscalationResponse>(
                 context,
-                manager.AgentInstallationId.Value,
+                chief.AgentInstallationId.Value,
                 ProductManagementCapabilities.Escalation,
                 new ProductEscalationRequest(
                     self.Id,
@@ -1639,7 +1668,7 @@ If the context is not sufficient to identify the deliverable responsibly, state 
                 operatingContext with { RoleBrief = roleBrief });
             var review = await InvokeCoordinationAsync<ProductPlanReviewRequest, ProductPlanReviewResponse>(
                 context,
-                manager.AgentInstallationId.Value,
+                chief.AgentInstallationId.Value,
                 ProductManagementCapabilities.PlanReview,
                 new ProductPlanReviewRequest(
                     self.Id,
@@ -1651,14 +1680,10 @@ If the context is not sufficient to identify the deliverable responsibly, state 
                 cancellationToken);
             if (review.Status.Equals("Accepted", StringComparison.OrdinalIgnoreCase))
             {
-                _ = await SubmitTeamPlanForApprovalAsync(
-                    self,
-                    installationId,
+                _ = await context.Platform.Communication.SendMessageAsync(
                     managerConversationId,
-                    plan,
-                    roleBrief.Constraints,
-                    eventId,
-                    context,
+                    BuildCeoTeamReviewRequest(plan, "initial"),
+                    $"product-onboarding-team-review:{eventId:D}",
                     cancellationToken);
             }
             else
@@ -1675,51 +1700,7 @@ If the context is not sufficient to identify the deliverable responsibly, state 
         }
     }
 
-    private static async Task<ResourceChangeRequestResponse> SubmitTeamPlanForApprovalAsync(
-        OrganizationPerson self,
-        Guid installationId,
-        Guid managerConversationId,
-        ProductPlanResponse plan,
-        IReadOnlyList<string> constraints,
-        Guid sourceEventId,
-        AgentRuntimeContext context,
-        CancellationToken cancellationToken)
-    {
-        var roles = plan.TeamStructure
-            .OrderBy(role => role.Priority)
-            .Select(role => new ResourceChangeRole(
-                NormalizeRoleKey(role.Title),
-                "Product",
-                role.Title,
-                role.Purpose,
-                1,
-                role.Priority,
-                role.Timing,
-                RequiredCapabilitiesFor(role.Title),
-                false,
-                self.Id,
-                null))
-            .ToList();
-        var request = new ResourceChangeProposalRequest(
-            managerConversationId,
-            Guid.Empty,
-            plan.Recommendation,
-            "The proposed roles form the smallest cross-functional team that covers the approved product outcome and its independent quality needs.",
-            plan.ContextRevision,
-            roles,
-            plan.Assumptions,
-            constraints,
-            null,
-            $"product-team:{installationId:N}:{sourceEventId:N}")
-        {
-            TeamKey = $"product-team:{self.Id:N}",
-            TeamName = $"Product Team — {self.DisplayName}",
-            TeamDescription = $"Delivery team for {plan.Recommendation}"
-        };
-        return await context.Platform.ProposeResourceChangeAsync(request, cancellationToken);
-    }
-
-    private async Task SubmitContextUpdateTeamPlanAsync(
+    private async Task RouteContextUpdatePlanToCeoAsync(
         ProductContextUpdateRequest update,
         AgentRuntimeContext context,
         CancellationToken cancellationToken)
@@ -1738,14 +1719,9 @@ If the context is not sufficient to identify the deliverable responsibly, state 
             person.AgentInstallationId == installationId &&
             person.IsActive)
             ?? throw new InvalidOperationException("The Software Product Manager is not active in the organization.");
-        var manager = self.ReportsToId.HasValue
-            ? organization.People.SingleOrDefault(person =>
-                person.Id == self.ReportsToId.Value &&
-                person.IsActive &&
-                person.AgentInstallationId.HasValue)
-            : null;
-        if (manager is null || !IsChiefManager(manager, organization))
-            throw new InvalidOperationException("The ready context update did not come from the active Chief of Staff manager.");
+        var manager = FindCeoManager(self, organization);
+        if (manager is null)
+            throw new InvalidOperationException("The Software Product Manager has no active CEO manager for the refreshed team approval.");
         var conversationId = await EnsureManagerConversationAsync(
             manager,
             context,
@@ -1754,20 +1730,20 @@ If the context is not sufficient to identify the deliverable responsibly, state 
         var plan = ProductManagerOrchestrator.BuildProductPlan(
             new ProductPlanRequest(
                 update.RoleBrief,
-                "Refresh the product strategy and submit the complete desired product team for manager approval.",
+                "Refresh the product strategy and prepare the complete desired product team for CEO approval.",
                 update.SourceEventId,
                 update.IdempotencyKey),
             operatingContext);
-        _ = await SubmitTeamPlanForApprovalAsync(
-            self,
-            installationId,
+        _ = await context.Platform.Communication.SendMessageAsync(
             conversationId,
-            plan,
-            update.RoleBrief.Constraints,
-            update.SourceEventId,
-            context,
+            BuildCeoTeamReviewRequest(plan, "refreshed"),
+            $"product-context-team-review:{update.SourceEventId:D}:{update.RoleBrief.ContextRevision}",
             cancellationToken);
     }
+
+    internal static string BuildCeoTeamReviewRequest(ProductPlanResponse plan, string planKind) =>
+        $"I have completed the {planKind} Product Manager-authored team design for **{plan.Recommendation}** and reconciled it with the Chief of Staff. " +
+        "Because you are the CEO and approval authority, the platform requires your direct instruction in this conversation before I submit the atomic team request for approval.";
 
     internal static string BuildProductBoardName(string productGoal)
     {
@@ -2898,20 +2874,16 @@ to the authoritative manager. Never invent the missing decision or bypass a gove
             x.IsActive &&
             x.AgentInstallationId == productManagerInstallationId)
             ?? throw new InvalidOperationException("The Software Product Manager is not present in the current organization snapshot.");
-        var manager = self.ReportsToId.HasValue
-            ? operatingContext.Organization?.People.SingleOrDefault(x =>
-                x.Id == self.ReportsToId.Value &&
-                x.IsActive &&
-                x.EmployeeType.Equals("Agent", StringComparison.OrdinalIgnoreCase) &&
-                x.AgentInstallationId.HasValue)
+        var chief = operatingContext.Organization is { } organization
+            ? FindChiefLiaison(self, organization)
             : null;
-        if (manager?.AgentInstallationId is null)
-            throw new InvalidOperationException("No active Chief of Staff manages this Software Product Manager.");
+        if (chief?.AgentInstallationId is null)
+            throw new InvalidOperationException("No active Chief of Staff shares this Software Product Manager's CEO manager.");
 
         var sourceId = input.MessageId != Guid.Empty ? input.MessageId : Guid.NewGuid();
         return await InvokeCoordinationAsync<ProductEscalationRequest, ProductEscalationResponse>(
             runtimeContext,
-            manager.AgentInstallationId.Value,
+            chief.AgentInstallationId.Value,
             ProductManagementCapabilities.Escalation,
             new ProductEscalationRequest(
                 productManagerId,
@@ -2953,11 +2925,9 @@ to the authoritative manager. Never invent the missing decision or bypass a gove
             x.Id == selfId &&
             x.IsActive &&
             x.AgentInstallationId == installationId);
-        return self?.ReportsToId == brief.ChiefOrganizationUserId &&
-               operatingContext.Organization?.People.Any(x =>
-                   x.Id == brief.ChiefOrganizationUserId &&
-                   x.IsActive &&
-                   x.EmployeeType.Equals("Agent", StringComparison.OrdinalIgnoreCase)) == true;
+        if (self is null || operatingContext.Organization is not { } organization)
+            return false;
+        return FindChiefLiaison(self, organization)?.Id == brief.ChiefOrganizationUserId;
     }
 
     private async Task HandleManagementReviewAsync(AgentEventEnvelope message, AgentRuntimeContext context, CancellationToken cancellationToken)
