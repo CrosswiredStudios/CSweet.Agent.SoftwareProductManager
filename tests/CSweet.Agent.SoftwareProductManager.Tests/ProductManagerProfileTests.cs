@@ -114,7 +114,7 @@ public sealed class ProductManagerProfileTests
             "src",
             "CSweet.Agent.SoftwareProductManager",
             "CSweet.Agent.SoftwareProductManager.csproj"));
-        Assert.Contains("CSweet.Agent.SDK\" Version=\"3.9.0", project, StringComparison.Ordinal);
+        Assert.Contains("CSweet.Agent.SDK\" Version=\"3.10.0", project, StringComparison.Ordinal);
         Assert.Contains("<ProjectReference", project, StringComparison.Ordinal);
         Assert.Contains($"<Version>{ProductManagerProfile.Version}</Version>", project, StringComparison.Ordinal);
     }
@@ -137,7 +137,7 @@ public sealed class ProductManagerProfileTests
         Assert.Contains("a Chief-triggered update is not manager authorization", ProductManagerProfile.SystemPrompt, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Do not provide technical architecture", ProductManagerProfile.SystemPrompt, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("primary startup goal", ProductManagerProfile.SystemPrompt, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("kanban board", ProductManagerProfile.SystemPrompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("software board", ProductManagerProfile.SystemPrompt, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("resubmit", ProductManagerProfile.SystemPrompt, StringComparison.OrdinalIgnoreCase);
         Assert.Contains(
             ProductManagerProfile.SoftwareArchitectureDesignCapability,
@@ -266,16 +266,16 @@ What level of prototype fidelity are we aiming for?
     [Fact]
     public void ArchitectDirectMessage_BecomesAnAutonomousPlanningTrigger()
     {
-        var incoming = new UserMessageReceived(
+        var incoming = new CommunicationMessageReceivedEvent(
             Guid.NewGuid(),
             Guid.NewGuid().ToString("D"),
             Guid.NewGuid().ToString("D"),
             "The architecture role is ready.",
             new Dictionary<string, string>
             {
-                [AgentMessageContextKeys.SenderEmployeeType] = "Agent",
-                [AgentMessageContextKeys.SenderRole] = "Software Architect",
-                [AgentMessageContextKeys.SenderDisplayName] = "C-Sweet Software Architect"
+                [CommunicationMessageContextKeys.SenderEmployeeType] = "Agent",
+                [CommunicationMessageContextKeys.SenderRole] = "Software Architect",
+                [CommunicationMessageContextKeys.SenderDisplayName] = "C-Sweet Software Architect"
             },
             Guid.NewGuid(),
             1,
@@ -663,10 +663,11 @@ What level of prototype fidelity are we aiming for?
     [Fact]
     public void ProductBoardName_IsAppropriateStableAndWithinPlatformLimit()
     {
-        var name = ProductManagerAgent.BuildProductBoardName(new string('x', 300));
-
-        Assert.Equal("Product Team", name);
-        Assert.True(name.Length <= 160);
+        Assert.Equal("Web Games", ProductManagerAgent.BuildProductBoardName("We make amazing web games"));
+        Assert.Equal("Product Work", ProductManagerAgent.BuildProductBoardName(new string('x', 300)));
+        Assert.True(ProductManagerAgent.IsValidProductBoardName("Creator Onboarding"));
+        Assert.False(ProductManagerAgent.IsValidProductBoardName("Creator Onboarding Kanban Board"));
+        Assert.True(ProductManagerAgent.BuildProductBoardName("Creator onboarding").Length <= 32);
     }
 
     [Fact]
@@ -1092,6 +1093,14 @@ What level of prototype fidelity are we aiming for?
             .RegisterCapability<WorkBoardReference, WorkBoardDetail>(
                 WorkItemCapabilities.Read,
                 (_, _) => Task.FromResult(new WorkBoardDetail(board, columns, [])))
+            .RegisterCapability<ConfigureWorkBoardRequest, WorkBoardSummary>(
+                WorkBoardCapabilities.Configure,
+                (request, _) => Task.FromResult(board with
+                {
+                    Name = request.Name,
+                    Description = request.Description,
+                    Revision = request.ExpectedRevision + 1
+                }))
             .RegisterCapability<ConfigureSoftwareOrchestrationTemplateRequest, WorkOrchestrationPolicyRevision>(
                 WorkOrchestrationCapabilities.ConfigureSoftwareTemplate,
                 (request, _) => Task.FromResult(new WorkOrchestrationPolicyRevision(
@@ -1156,18 +1165,16 @@ What level of prototype fidelity are we aiming for?
         await agent.HandleHiringRecommendationFulfilledAsync(fulfilled, context, CancellationToken.None);
 
         var kickoffKeys = messages
-            .Where(x => x.IdempotencyKey == $"software-team-architect-kickoff:{requestId:N}")
+            .Where(x => x.IdempotencyKey == $"software-team-architect-reconcile:{teamId:N}:d1:q1")
             .ToList();
         Assert.Equal(2, kickoffKeys.Count);
         Assert.Single(kickoffKeys.Select(x => x.IdempotencyKey).Distinct());
         Assert.All(kickoffKeys, x => Assert.Contains("<software_team_planning_kickoff>", x.Content, StringComparison.Ordinal));
-        Assert.Contains(messages, x => x.IdempotencyKey == $"software-team-kickoff:{requestId:N}");
-        Assert.Contains(messages, x => x.Content.Contains("planning has started", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(createdChats, x => x.IsDirect && x.ParticipantOrganizationUserIds.SequenceEqual([architectId]));
         Assert.Equal(2, coordinationRequests.Count);
         Assert.Single(coordinationRequests.Select(x => x.IdempotencyKey).Distinct(StringComparer.Ordinal));
         Assert.All(coordinationRequests, x =>
-            Assert.Equal($"software-team-planning:{requestId:N}", x.IdempotencyKey));
+            Assert.Equal($"product-architect-planning:{teamId:N}", x.IdempotencyKey));
     }
 
     [Fact]

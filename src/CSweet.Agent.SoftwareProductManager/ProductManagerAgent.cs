@@ -224,7 +224,7 @@ delivery-planning:{request.SessionId:N}:finalize. Do not create generic placehol
                 ProductManagerProfile.ConverseCapability,
                 context,
                 cancellationToken,
-                allowResourceChangeApprovalTool: false);
+                allowResourceChangeApprovalTool: true);
 
             var detail = await context.Platform.Work.ReadBoardAsync(board.Id, cancellationToken);
             var sprints = await context.Platform.Work.ListSprintsAsync(board.Id, cancellationToken);
@@ -300,7 +300,7 @@ delivery-planning:{request.SessionId:N}:finalize. Do not create generic placehol
             return;
         }
 
-        var incoming = DeserializePayload<UserMessageReceived>(message.Data);
+        var incoming = DeserializePayload<CommunicationMessageReceivedEvent>(message.Data);
 
         if (incoming is null ||
             incoming.ProviderProfileId == Guid.Empty ||
@@ -496,6 +496,9 @@ Retry now. The ensure_software_team_board tool is required. Use its structured r
             return;
         }
 
+        if (await TryHandleArchitectReadinessAsync(incoming, context, cancellationToken))
+            return;
+
         if (builder.Length == 0)
         {
             _logger.LogWarning(
@@ -617,7 +620,10 @@ Retry now. The ensure_software_team_board tool is required. Use its structured r
 
             var response = ProductManagerOrchestrator.BuildContextUpdateResponse(update);
             if (response.PlanRefreshRequired)
+            {
                 await RouteContextUpdatePlanToCeoAsync(update, context, cancellationToken);
+                await DisseminateContextUpdateAsync(update, response, context, cancellationToken);
+            }
             return new AgentWorkResult(true, SerializePayload(response));
         }
 
@@ -675,6 +681,74 @@ Retry now. The ensure_software_team_board tool is required. Use its structured r
             text,
             $"resource-change-decision-ack:{request.Id:N}:{request.Status}",
             cancellationToken);
+    }
+
+    private async Task<bool> TryHandleArchitectReadinessAsync(
+        CommunicationMessageReceivedEvent incoming,
+        AgentRuntimeContext context,
+        CancellationToken cancellationToken)
+    {
+        if (!incoming.Message.Contains("onboard", StringComparison.OrdinalIgnoreCase) ||
+            !incoming.Message.Contains("ready to begin", StringComparison.OrdinalIgnoreCase) ||
+            incoming.Context is null ||
+            !incoming.Context.TryGetValue(CommunicationMessageContextKeys.SenderEmployeeType, out var employeeType) ||
+            !employeeType.Equals("Agent", StringComparison.OrdinalIgnoreCase) ||
+            !incoming.Context.TryGetValue(CommunicationMessageContextKeys.SenderOrganizationUserId, out var senderValue) ||
+            !Guid.TryParse(senderValue, out var senderId) ||
+            !Guid.TryParse(incoming.ConversationId, out var conversationId) ||
+            !Guid.TryParse(context.InstallationId, out var installationId))
+            return false;
+
+        var roster = await ReadCompleteTeamRosterAsync(context, cancellationToken);
+        if (roster.Team is null || !Guid.TryParse(roster.Team.TeamId, out var teamId))
+            return false;
+        var operatingContext = await _orchestrator.AssembleContextAsync(context, cancellationToken);
+        var organization = operatingContext.Organization;
+        var self = organization?.People.SingleOrDefault(x =>
+            x.AgentInstallationId == installationId && x.IsActive);
+        var architect = organization?.People.SingleOrDefault(x => x.Id == senderId && x.IsActive);
+        var rosterArchitect = roster.Team.Members.Any(x =>
+            Guid.TryParse(x.EmployeeId, out var employeeId) && employeeId == senderId &&
+            !x.Presence.Equals("Inactive", StringComparison.OrdinalIgnoreCase) &&
+            NormalizeRoleIdentity(x.TeamRole ?? x.CompanyRole ?? string.Empty) ==
+            NormalizeRoleIdentity("Software Architect"));
+        if (self is null || architect?.AgentInstallationId is null || architect.ReportsToId != self.Id || !rosterArchitect)
+            return false;
+
+        var approved = await context.Platform.ReadResourceChangesAsync(
+            new ResourceChangeReadRequest(Statuses: ["Approved"]), cancellationToken);
+        var request = approved.Requests
+            .Where(x => x.TeamId == teamId && x.RequesterInstallationId == installationId)
+            .OrderByDescending(x => x.DecidedAt ?? x.CreatedAt)
+            .FirstOrDefault();
+        if (request is null)
+            return false;
+
+        var board = (await EnsureSoftwareTeamBoardAsync(request, roster.Team, context, cancellationToken)).Board;
+        const string acknowledgement =
+            "Welcome aboard. I’ve confirmed your onboarding and I’m ready to build the product plan and provisional backlog with you.";
+        _ = await context.Platform.Communication.SendMessageAsync(
+            conversationId,
+            acknowledgement,
+            $"product-architect-readiness-ack:{teamId:N}",
+            cancellationToken);
+        _ = await context.Platform.Communication.StartCoordinationAsync(
+            new StartAgentCoordinationRequest(
+                architect.Id,
+                $"{board.Name} planning",
+                request.ProductGoal,
+                [
+                    "Product outcomes, priorities, requirements, acceptance criteria, and non-goals are explicit.",
+                    "Architecture supplies dependency order, risks, technical slices, and implementation sequencing.",
+                    "An undated, unestimated, unassigned provisional backlog is published before delivery staffing."
+                ],
+                acknowledgement,
+                conversationId,
+                incoming.TurnId,
+                incoming.MessageId,
+                $"product-architect-planning:{teamId:N}"),
+            cancellationToken);
+        return true;
     }
 
     internal async Task HandleHiringRecommendationFulfilledAsync(
@@ -738,11 +812,9 @@ Retry now. The ensure_software_team_board tool is required. Use its structured r
             content,
             $"hiring-recommendation-fulfilled:{message.EventId:N}:product-manager",
             cancellationToken);
-        var mandatorySoftwareRolesCovered = new[]
-        {
-            "Software Architect", "Software Developer", "Software QA"
-        }.All(role => coverage.GetValueOrDefault(NormalizeRoleIdentity(role)) > 0);
-        if (roster.Team is not null && gaps.Count == 0 && mandatorySoftwareRolesCovered)
+        var architectCovered = coverage.GetValueOrDefault(
+            NormalizeRoleIdentity("Software Architect")) > 0;
+        if (roster.Team is not null && architectCovered)
             await StartSoftwareTeamCollaborationAsync(
                 request, roster.Team, content, context, cancellationToken);
     }
@@ -760,101 +832,64 @@ Retry now. The ensure_software_team_board tool is required. Use its structured r
         var operatingContext = await _orchestrator.AssembleContextAsync(context, cancellationToken);
         var organization = operatingContext.Organization
             ?? throw new InvalidOperationException(
-                "The organization snapshot is required to create the software-team chat.");
+                "The organization snapshot is required to reconcile product planning.");
         var self = organization.People.SingleOrDefault(x =>
             x.AgentInstallationId == installationId && x.IsActive)
             ?? throw new InvalidOperationException(
                 "The Software Product Manager does not have an active employee identity.");
-        var manager = self.ReportsToId.HasValue
-            ? organization.People.SingleOrDefault(x => x.Id == self.ReportsToId.Value && x.IsActive)
-            : null;
-        if (manager is null)
-            throw new InvalidOperationException(
-                "The Software Product Manager must have an active manager before team collaboration begins.");
-
-        var memberIds = BuildDeliveryChatParticipants(team, self.Id, manager.Id);
         var boardDetail = await EnsureSoftwareTeamBoardAsync(
             request, team, context, cancellationToken);
         var board = boardDetail.Board;
-        var chat = await EnsureDeliveryChatAsync(
-            team.Name, memberIds, context, cancellationToken);
         var architects = ActiveTeamAgentsForRole(team, organization, "Software Architect");
         var developers = ActiveTeamMembersForRole(team, organization, "Software Developer");
         var quality = ActiveTeamMembersForRole(team, organization, "Software QA");
-        var repositories = await context.Platform.Work.ListTeamRepositoryOptionsAsync(
-            new TeamRepositoryOptionsRequest(teamId), cancellationToken);
-        var repositoryPrompt = repositories.Count == 0
-            ? "No code project is selected yet. Draft planning continues now; repository and base-branch approval are required only before execution."
-            : "Please select the code project for the first sprint: " +
-              string.Join("; ", repositories.Select(x => $"{x.Name} ({x.DeliveryKind})")) + ".";
-        if (architects.Count != 1 || developers.Count == 0 || quality.Count == 0)
+        if (architects.Count != 1)
         {
-            var blocker = architects.Count switch
-            {
-                0 => "Delivery planning cannot start because the fully staffed team has no active Software Architect installation.",
-                > 1 => "Delivery planning cannot start because the team has multiple active Software Architects and no designated lead. Please designate one accountable Architect.",
-                _ when developers.Count == 0 => "Delivery planning cannot start because the fully staffed team has no active Software Developer.",
-                _ => "Delivery planning cannot start because the fully staffed team has no active Software QA."
-            };
-            _ = await context.Platform.Communication.SendMessageAsync(
-                chat.Id, blocker, $"software-team-planning-blocker:{request.Id:N}", cancellationToken);
+            var blocker = architects.Count == 0
+                ? "Planning is waiting for one active Software Architect installation."
+                : "Planning is waiting for one designated Software Architect because multiple active candidates match the role.";
             _ = await context.Platform.Communication.SendMessageAsync(
                 request.ConversationId, blocker,
-                $"software-team-planning-manager-blocker:{request.Id:N}", cancellationToken);
+                $"software-team-planning-manager-blocker:{teamId:N}", cancellationToken);
             return;
         }
-
-        var kickoff = $"{hiringStatus}\n\nThe **{board.Name}** board is ready with the software workflow: " +
-                      "Backlog -> Ready For Development -> In Development -> Dev Complete -> " +
-                      $"In Testing -> Ready To Merge -> Done. Product and architecture planning starts now; " +
-                      $"Developer and QA review is welcome but is not a publication gate. {repositoryPrompt}";
-        _ = await context.Platform.Communication.SendMessageAsync(
-            chat.Id, kickoff, $"software-team-kickoff:{request.Id:N}",
-            cancellationToken);
 
         var architectureKickoff = $"""
 <software_team_planning_kickoff>
 Approved team request: {request.Id:D}
 Board: {board.Name} ({board.Id:D})
 Approved product goal: {request.ProductGoal}
-Rationale: {request.Rationale}
-Constraints:
-- {FormatPlanningList(request.Constraints)}
-Assumptions:
-- {FormatPlanningList(request.Assumptions)}
+Staffing reconciliation: {hiringStatus}
+Active Developers: {developers.Count}
+Active Software QA: {quality.Count}
 
-The complete approved team is filled. Begin the durable delivery-planning collaboration now.
-Help turn the authoritative product requirements and acceptance criteria into a bounded,
-release-sized multi-sprint architecture plan and junior-ready tickets. Repository and base-branch
-selection gate publication and executable assignment, but they do not gate the read-only draft.
-If a product decision is missing, return exactly one focused blocker to me.
+Begin or continue the durable private PM-Architect planning collaboration. Publish an undated,
+unestimated, unassigned provisional backlog even when Developer or QA staffing is incomplete.
+When Developers become available, add authoritative assignments and repository delivery details.
+QA may remain unassigned until hired. Return exactly one focused product blocker at a time.
 </software_team_planning_kickoff>
 """;
         var architectDispatch = await context.Platform.Communication.SendDirectAgentMessageAsync(
             architects[0].Id,
             architectureKickoff,
-            $"software-team-architect-kickoff:{request.Id:N}",
+            $"software-team-architect-reconcile:{teamId:N}:d{developers.Count}:q{quality.Count}",
             cancellationToken);
         _ = await context.Platform.Communication.StartCoordinationAsync(
             new StartAgentCoordinationRequest(
                 architects[0].Id,
-                $"{team.Name} delivery planning",
+                $"{board.Name} planning",
                 request.ProductGoal,
                 [
                     "Product requirements, priorities, acceptance criteria, and non-goals are explicit.",
                     "Architecture defines bounded sprints, dependencies, constraints, failure behavior, and testable Stories and Tasks.",
-                    "Planning-only Backlog tickets are published before repository approval; execution remains gated until delivery finalization."
+                    "Planning-only Backlog tickets remain provisional until repository details and staffing are authoritative.",
+                    "No execution is dispatched until the Product Manager explicitly starts the selected sprint."
                 ],
                 architectureKickoff,
                 architectDispatch.ChatId,
                 architectDispatch.RecipientChatTurnId,
                 architectDispatch.MessageId,
-                $"software-team-planning:{request.Id:N}"),
-            cancellationToken);
-        _ = await context.Platform.Communication.SendMessageAsync(
-            request.ConversationId,
-            $"The complete software team and delivery board are ready, and Product Manager–Architect planning has started. {repositoryPrompt}",
-            $"software-team-repository-selection:{request.Id:N}",
+                $"product-architect-planning:{teamId:N}"),
             cancellationToken);
     }
 
@@ -1024,9 +1059,9 @@ If a product decision is missing, return exactly one focused blocker to me.
             ActiveTeamMembersForRole(roster.Team, organization, "Software Developer"));
         var qualityAssignments = BuildArchitectureAssignmentPool(
             ActiveTeamMembersForRole(roster.Team, organization, "Software QA"));
-        if (developerAssignments.Count == 0 || qualityAssignments.Count == 0)
+        if (developerAssignments.Count == 0)
             throw new InvalidOperationException(
-                "The team requires at least one active Software Developer and one active Software QA before publication.");
+                "The team requires at least one active Software Developer before delivery can be finalized.");
 
         var options = await context.Platform.Work.ListTeamRepositoryOptionsAsync(
             new TeamRepositoryOptionsRequest(board.Board.TeamId.Value), cancellationToken);
@@ -1102,15 +1137,53 @@ If a product decision is missing, return exactly one focused blocker to me.
             }
             if (item.ColumnId == readyColumnId) readyTicketIds.Add(item.Id);
         }
+        var sprintStarted = readyTicketIds.Count > 0 &&
+                            await StartPublishedSprintAsync(
+                                boardId, publication, context, cancellationToken);
         await NotifyDeliveryPlanningStatusAsync(
             $"Architecture plan `{publication.PlanId:D}` is approved and published with " +
             $"{publication.Sprints.Count} planned sprint(s) and {publication.Tickets.Count} ticket(s). " +
-            $"{readyTicketIds.Count} executable ticket(s) from the earliest sprint are Ready For Development; " +
-            "later sprints remain in Backlog and no sprint was started.",
+            $"{readyTicketIds.Count} executable ticket(s) from the earliest sprint are Ready For Development. " +
+            (sprintStarted
+                ? "The Product Manager preflighted and explicitly started that sprint; later sprints remain Planned."
+                : "The sprint remains Planned because it was not eligible for Product Manager activation."),
             $"software-architecture:{publication.PlanId:N}:published",
             context,
             cancellationToken);
         return new GuardedArchitecturePublishResult(publication, readyTicketIds);
+    }
+
+    private static async Task<bool> StartPublishedSprintAsync(
+        Guid boardId,
+        ArchitecturePublishResponse publication,
+        AgentRuntimeContext context,
+        CancellationToken cancellationToken)
+    {
+        var earliest = publication.Sprints.OrderBy(x => x.Ordinal).FirstOrDefault();
+        if (earliest is null)
+            return false;
+        var sprint = (await context.Platform.Work.ListSprintsAsync(boardId, cancellationToken))
+            .SingleOrDefault(x => x.Id == earliest.SprintId);
+        if (sprint is null || !sprint.Status.Equals("Planned", StringComparison.OrdinalIgnoreCase))
+            return false;
+        var request = new StartWorkSprintExecutionRequest(
+            boardId,
+            sprint.Id,
+            sprint.Revision,
+            $"software-architecture:{publication.PlanId:N}:sprint:{sprint.Id:N}:start");
+        var preflight = await context.Platform.InvokeAsync<
+            StartWorkSprintExecutionRequest,
+            WorkSprintPreflightResult>(
+            ProductManagerProfile.PreflightSprintCapability,
+            request,
+            cancellationToken);
+        if (!preflight.IsValid)
+            return false;
+        _ = await context.Platform.InvokeAsync<StartWorkSprintExecutionRequest, JsonElement>(
+            ProductManagerProfile.StartSprintCapability,
+            request,
+            cancellationToken);
+        return true;
     }
 
     internal static IReadOnlyList<ArchitectureAssignmentPrincipal> BuildArchitectureAssignmentPool(
@@ -1312,19 +1385,9 @@ If a product decision is missing, return exactly one focused blocker to me.
         var coverage = (team.RoleCoverage ?? [])
             .GroupBy(x => NormalizeRoleIdentity(x.Role), StringComparer.Ordinal)
             .ToDictionary(x => x.Key, x => x.Sum(item => item.Count), StringComparer.Ordinal);
-        var missingApprovedRoles = request.Roles
-            .Where(role => coverage.GetValueOrDefault(NormalizeRoleIdentity(role.Title)) < role.Headcount)
-            .Select(role => role.Title)
-            .ToList();
-        var missingMandatoryRoles = new[] { "Software Architect", "Software Developer", "Software QA" }
-            .Where(role => coverage.GetValueOrDefault(NormalizeRoleIdentity(role)) == 0)
-            .ToList();
-        var missingRoles = missingApprovedRoles.Concat(missingMandatoryRoles)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
-        if (missingRoles.Count > 0)
+        if (coverage.GetValueOrDefault(NormalizeRoleIdentity("Software Architect")) == 0)
             throw new InvalidOperationException(
-                "The approved roster is incomplete. Missing active role coverage: " + string.Join(", ", missingRoles) + ".");
+                "An active Software Architect is required before the approved planning board can be provisioned.");
 
         var operatingContext = await _orchestrator.AssembleContextAsync(context, cancellationToken);
         var self = operatingContext.Organization?.People.SingleOrDefault(x =>
@@ -1355,8 +1418,8 @@ If a product decision is missing, return exactly one focused blocker to me.
 
         board ??= await context.Platform.Work.CreateBoardAsync(
             new CreateWorkBoardRequest(
-                BuildProductBoardName(team.Name),
-                $"Kanban board for the approved product-team plan: {request.ProductGoal}",
+                BuildProductBoardName(request.ProductGoal),
+                $"Approved product planning work: {request.ProductGoal}",
                 $"product-team-board:{request.RequesterOrganizationUserId:N}:create:v2")
             {
                 TeamId = teamId,
@@ -1364,7 +1427,23 @@ If a product decision is missing, return exactly one focused blocker to me.
             },
             cancellationToken);
 
+        if (board.ManagerOrganizationUserId != self.Id)
+            throw new InvalidOperationException(
+                "Only the assigned Product Manager may configure or activate the approved team board.");
+
         var detail = await context.Platform.Work.ReadBoardAsync(board.Id, cancellationToken);
+        if (!IsValidProductBoardName(detail.Board.Name))
+        {
+            _ = await context.Platform.Work.ConfigureBoardAsync(
+                new ConfigureWorkBoardRequest(
+                    detail.Board.Id,
+                    detail.Board.Revision,
+                    BuildProductBoardName(request.ProductGoal),
+                    detail.Board.Description,
+                    $"product-team-board:{request.RequesterOrganizationUserId:N}:name-policy:v1"),
+                cancellationToken);
+            detail = await context.Platform.Work.ReadBoardAsync(board.Id, cancellationToken);
+        }
         var desired = BuildReconciledSoftwareBoardColumns(detail);
         if (!ColumnsMatch(detail.Columns, desired))
         {
@@ -1808,14 +1887,91 @@ If the context is not sufficient to identify the deliverable responsibly, state 
             cancellationToken);
     }
 
+    private async Task DisseminateContextUpdateAsync(
+        ProductContextUpdateRequest update,
+        ProductContextUpdateResponse response,
+        AgentRuntimeContext context,
+        CancellationToken cancellationToken)
+    {
+        var roster = await ReadCompleteTeamRosterAsync(context, cancellationToken);
+        var operatingContext = await _orchestrator.AssembleContextAsync(context, cancellationToken);
+        if (roster.Team is null || operatingContext.Organization is null)
+            return;
+        var architects = ActiveTeamAgentsForRole(
+            roster.Team, operatingContext.Organization, "Software Architect");
+        var summary = "Authoritative product context was refreshed: " +
+                      string.Join("; ", response.MaterialChanges) +
+                      ". Reconcile any affected requirements, acceptance criteria, dependencies, and ticket notes.";
+        foreach (var architect in architects)
+            _ = await context.Platform.Communication.SendDirectAgentMessageAsync(
+                architect.Id,
+                summary,
+                $"product-context-update:{update.SourceEventId:N}:architect:{architect.Id:N}",
+                cancellationToken);
+
+        if (!Guid.TryParse(roster.Team.TeamId, out var teamId))
+            return;
+        var boards = await context.Platform.Work.ListBoardsAsync(
+            new WorkBoardListRequest(IncludeArchived: false), cancellationToken);
+        foreach (var board in boards.Where(x => x.TeamId == teamId && !x.IsArchived))
+        {
+            var detail = await context.Platform.Work.ReadBoardAsync(board.Id, cancellationToken);
+            foreach (var item in detail.Items.Where(x =>
+                         x.Kind is WorkItemKinds.Story or WorkItemKinds.Task && x.Planning is not null))
+                _ = await context.Platform.Work.CommentAsync(
+                    new CommentOnWorkItemRequest(
+                        board.Id,
+                        item.Id,
+                        summary,
+                        $"product-context-update:{update.SourceEventId:N}:item:{item.Id:N}"),
+                    cancellationToken);
+        }
+    }
+
     internal static string BuildCeoTeamReviewRequest(ProductPlanResponse plan, string planKind) =>
         $"I have completed the {planKind} Product Manager-authored team design for **{plan.Recommendation}** and reconciled it with the Chief of Staff. " +
         "Because you are the CEO and approval authority, the platform requires your direct instruction in this conversation before I submit the atomic team request for approval.";
 
-    internal static string BuildProductBoardName(string teamName)
+    private static readonly HashSet<string> BoardNameNoiseWords = new(StringComparer.OrdinalIgnoreCase)
     {
-        return NormalizeConciseTeamName(teamName, "Product Team");
+        "a", "an", "and", "amazing", "approved", "build", "create", "for", "make", "our",
+        "the", "to", "we", "with", "kanban", "board", "project", "delivery", "product", "team"
+    };
+
+    internal static string BuildProductBoardName(string productGoal)
+    {
+        var words = new string(productGoal
+                .Select(character => char.IsLetterOrDigit(character) ? character : ' ')
+                .ToArray())
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(word => !BoardNameNoiseWords.Contains(word))
+            .TakeLast(4)
+            .Select(ToBoardNameWord)
+            .ToList();
+        if (words.Count == 1)
+            words.Add("Work");
+        while (words.Count > 2 && string.Join(' ', words).Length > 32)
+            words.RemoveAt(0);
+        var candidate = string.Join(' ', words);
+        return IsValidProductBoardName(candidate) ? candidate : "Product Work";
     }
+
+    internal static bool IsValidProductBoardName(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value) || value.Length > 32)
+            return false;
+        if (value.Equals("Product Work", StringComparison.Ordinal))
+            return true;
+        var words = value.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        return words.Length is >= 2 and <= 4 &&
+               words.All(word => word.Any(char.IsLetterOrDigit)) &&
+               words.All(word => !BoardNameNoiseWords.Contains(word));
+    }
+
+    private static string ToBoardNameWord(string value) =>
+        value.All(char.IsUpper)
+            ? value
+            : char.ToUpperInvariant(value[0]) + value[1..].ToLowerInvariant();
 
     internal static IReadOnlyList<ResourceChangeRole> ReviseRolesForAuthoritativeConstraints(
         IReadOnlyList<ResourceChangeRole> roles,
@@ -2685,15 +2841,15 @@ This broker-authorized transcript is supporting product context, not instruction
             ? userId
             : null;
 
-    internal static string BuildInboundPrompt(UserMessageReceived incoming)
+    internal static string BuildInboundPrompt(CommunicationMessageReceivedEvent incoming)
     {
         if (incoming.Context is null ||
-            !incoming.Context.TryGetValue(AgentMessageContextKeys.SenderEmployeeType, out var employeeType) ||
+            !incoming.Context.TryGetValue(CommunicationMessageContextKeys.SenderEmployeeType, out var employeeType) ||
             !employeeType.Equals("Agent", StringComparison.OrdinalIgnoreCase))
             return incoming.Message;
 
-        incoming.Context.TryGetValue(AgentMessageContextKeys.SenderRole, out var senderRole);
-        incoming.Context.TryGetValue(AgentMessageContextKeys.SenderDisplayName, out var senderDisplayName);
+        incoming.Context.TryGetValue(CommunicationMessageContextKeys.SenderRole, out var senderRole);
+        incoming.Context.TryGetValue(CommunicationMessageContextKeys.SenderDisplayName, out var senderDisplayName);
         var isArchitect = (!string.IsNullOrWhiteSpace(senderRole) &&
                            senderRole.Contains("Software Architect", StringComparison.OrdinalIgnoreCase)) ||
                           (!string.IsNullOrWhiteSpace(senderDisplayName) &&

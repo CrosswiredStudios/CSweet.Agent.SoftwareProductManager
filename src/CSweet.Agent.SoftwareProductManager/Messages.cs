@@ -3,24 +3,6 @@ using CSweet.Agent.SDK;
 
 namespace CSweet.Agent.SoftwareProductManager;
 
-internal static class AgentMessageContextKeys
-{
-    public const string SenderOrganizationUserId = "senderOrganizationUserId";
-    public const string SenderDisplayName = "senderDisplayName";
-    public const string SenderEmployeeType = "senderEmployeeType";
-    public const string SenderRole = "senderRole";
-}
-
-public sealed record UserMessageReceived(
-    Guid ProviderProfileId,
-    string ConversationId,
-    string UserId,
-    string Message,
-    IReadOnlyDictionary<string, string>? Context,
-    Guid TurnId = default,
-    int Attempt = 0,
-    Guid MessageId = default);
-
 public sealed record AssistantCapabilityInput(
     Guid ProviderProfileId,
     string ConversationId,
