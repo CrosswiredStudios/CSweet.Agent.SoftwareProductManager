@@ -136,6 +136,25 @@ public sealed class ResourceChangeRoutingTests
     }
 
     [Fact]
+    public async Task VerboseRoleTiming_IsBoundedBeforeSubmission()
+    {
+        var fixture = new RoutingFixture(managerType: "Human", sourceIsManager: true);
+        var role = fixture.Role(
+            "game-developer",
+            "Game Developer") with
+        {
+            Timing = "Immediately after the architecture baseline is approved"
+        };
+
+        await fixture.SubmitAsync(roles: [role]);
+
+        var submittedRole = Assert.Single(fixture.Proposal!.Roles);
+        Assert.Equal(32, submittedRole.Timing.Length);
+        Assert.Equal("Immediately after the architectu", submittedRole.Timing);
+        Assert.Equal(1, fixture.ProposalCallCount);
+    }
+
+    [Fact]
     public async Task ExecutiveEmployeeReportingTarget_IsCanonicalizedToProductManager()
     {
         var fixture = new RoutingFixture(managerType: "Human", sourceIsManager: true);

@@ -1169,7 +1169,13 @@ What level of prototype fidelity are we aiming for?
             .ToList();
         Assert.Equal(2, kickoffKeys.Count);
         Assert.Single(kickoffKeys.Select(x => x.IdempotencyKey).Distinct());
-        Assert.All(kickoffKeys, x => Assert.Contains("<software_team_planning_kickoff>", x.Content, StringComparison.Ordinal));
+        Assert.All(kickoffKeys, x =>
+        {
+            Assert.StartsWith("Planning staffing update:", x.Content, StringComparison.Ordinal);
+            Assert.DoesNotContain("<software_team_planning_kickoff>", x.Content, StringComparison.Ordinal);
+            Assert.DoesNotContain(requestId.ToString("D"), x.Content, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("one focused product blocker", x.Content, StringComparison.OrdinalIgnoreCase);
+        });
         Assert.Contains(createdChats, x => x.IsDirect && x.ParticipantOrganizationUserIds.SequenceEqual([architectId]));
         Assert.Equal(2, coordinationRequests.Count);
         Assert.Single(coordinationRequests.Select(x => x.IdempotencyKey).Distinct(StringComparer.Ordinal));
