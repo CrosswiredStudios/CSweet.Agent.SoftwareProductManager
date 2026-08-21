@@ -71,6 +71,7 @@ public sealed class ProductManagerProfileTests
         Assert.Equal(ProductManagerProfile.AgentId, manifest.Id);
         Assert.Equal(ProductManagerProfile.Version, manifest.Version);
         Assert.Equal(1, manifest.Runtime.MaximumConcurrentJobs);
+        Assert.Equal(300, manifest.Runtime.DefaultTickFrequencySeconds);
         Assert.True(File.Exists(Path.Combine(Path.GetDirectoryName(manifestPath)!, "AGENTS.md")));
 
         using var document = JsonDocument.Parse(await File.ReadAllTextAsync(manifestPath));
@@ -87,6 +88,7 @@ public sealed class ProductManagerProfileTests
                 ProductManagerProfile.OnboardedEvent,
                 ProductManagerProfile.UserMessageReceivedEvent,
                 AgentCoordinationEvents.TurnRequested,
+                AgentAttentionEvents.ReviewDue,
                 ManagementEvents.ReviewDue,
                 ManagementEvents.ResourceChangeDecided,
                 ProductManagerProfile.RecommendationFulfilledEvent
@@ -114,7 +116,7 @@ public sealed class ProductManagerProfileTests
             "src",
             "CSweet.Agent.SoftwareProductManager",
             "CSweet.Agent.SoftwareProductManager.csproj"));
-        Assert.Contains("CSweet.Agent.SDK\" Version=\"3.10.0", project, StringComparison.Ordinal);
+        Assert.Contains("CSweet.Agent.SDK\" Version=\"3.11.0", project, StringComparison.Ordinal);
         Assert.Contains("<ProjectReference", project, StringComparison.Ordinal);
         Assert.Contains($"<Version>{ProductManagerProfile.Version}</Version>", project, StringComparison.Ordinal);
     }
@@ -286,6 +288,193 @@ What level of prototype fidelity are we aiming for?
         Assert.Contains("delivery-planning coordination trigger", prompt, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("publish planned sprints and tickets", prompt, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("exactly one focused blocking decision", prompt, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task AttentionReview_RecoversPersistedArchitectReadinessExactlyOnce()
+    {
+        var organizationId = Guid.NewGuid();
+        var teamId = Guid.NewGuid();
+        var requestId = Guid.NewGuid();
+        var managerId = Guid.NewGuid();
+        var productManagerId = Guid.NewGuid();
+        var productManagerInstallationId = Guid.NewGuid();
+        var architectId = Guid.NewGuid();
+        var architectInstallationId = Guid.NewGuid();
+        var chatId = Guid.NewGuid();
+        var readinessTurnId = Guid.NewGuid();
+        var readinessMessageId = Guid.NewGuid();
+        var boardId = Guid.NewGuid();
+        var personalBoardId = Guid.NewGuid();
+        var role = Role("architecture", "Software Architect", 1, "Now") with
+        {
+            ReportsToOrganizationUserId = productManagerId
+        };
+        var approved = new ResourceChangeRequestResponse(
+            requestId, organizationId, productManagerId, productManagerInstallationId, managerId,
+            chatId, Guid.NewGuid(), "Deliver a playable web game prototype",
+            "Create the smallest approved planning team.", 1, [role],
+            [new ResourceChangeRoleDelta("Add", role, null)], [], [], null,
+            "Approved", "Delivered", null, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow)
+        {
+            TeamId = teamId,
+            TeamName = "Web Games"
+        };
+        var team = new AgentTeamContext(
+            teamId.ToString("D"), "web-games", "Web Games", 1,
+            productManagerId.ToString("D"), "Product Manager",
+            [
+                new AgentTeammate(productManagerId.ToString("D"), "Product Manager", "Agent", null,
+                    "Software Product Manager", "Self", "Active"),
+                new AgentTeammate(architectId.ToString("D"), "Software Architect", "Agent", null,
+                    "Software Architect", "DirectReport", "Active")
+            ],
+            [new TeamRoleCoverage("Software Architect", 1)], 2, false);
+        var organization = new OrganizationSnapshotResponse(
+            organizationId, "Active",
+            [
+                new OrganizationPerson(productManagerId, "Product Manager", "Agent", null, managerId,
+                    productManagerInstallationId, true),
+                new OrganizationPerson(managerId, "Manager", "Human", null, null, null, true),
+                new OrganizationPerson(architectId, "Software Architect", "Agent", null, productManagerId,
+                    architectInstallationId, true)
+            ], [], [], [], [], DateTimeOffset.UtcNow);
+        var columns = new[]
+        {
+            new WorkBoardColumn(Guid.NewGuid(), "Backlog", "ToDo", 0, "Disabled", null),
+            new WorkBoardColumn(Guid.NewGuid(), "Ready For Development", "ToDo", 1, "Disabled", null),
+            new WorkBoardColumn(Guid.NewGuid(), "In Development", "InProgress", 2, "Disabled", null),
+            new WorkBoardColumn(Guid.NewGuid(), "Dev Complete", "InProgress", 3, "Disabled", null),
+            new WorkBoardColumn(Guid.NewGuid(), "In Testing", "InProgress", 4, "Disabled", null),
+            new WorkBoardColumn(Guid.NewGuid(), "Ready To Merge", "InProgress", 5, "Disabled", null),
+            new WorkBoardColumn(Guid.NewGuid(), "Done", "Done", 6, "Disabled", null)
+        };
+        var board = new WorkBoardSummary(boardId, "Web Games", "Approved", false, false, 1, [])
+        {
+            TeamId = teamId,
+            ManagerOrganizationUserId = productManagerId
+        };
+        var direct = new CommunicationChat(
+            chatId, "Software Architect", "Private direct conversation.", true, true, false, true,
+            DateTimeOffset.UtcNow,
+            [
+                new CommunicationParticipant(productManagerId, "Product Manager", "Agent", "Software Product Manager"),
+                new CommunicationParticipant(architectId, "Software Architect", "Agent", "Software Architect")
+            ], null, null, 0);
+        var readiness = new CommunicationMessage(
+            readinessMessageId, 1, chatId, architectId, "Software Architect", "Agent",
+            "I’m onboarded and ready to begin working with you on the product plan and kanban backlog.",
+            DateTimeOffset.UtcNow.AddMinutes(-5), readinessTurnId);
+        AddPersonalTodoItemRequest? addedCommitment = null;
+        PersonalTodoItem? commitment = null;
+        AgentCoordinationSession? session = null;
+        var coordinationStarts = new List<StartAgentCoordinationRequest>();
+        var sentMessages = new List<CommunicationSendCapture>();
+
+        var runtime = new AgentTestRuntime()
+            .RegisterCapability<ResourceChangeReadRequest, ResourceChangeReadResponse>(
+                PlatformCapabilities.ResourceChangeRead,
+                (_, _) => Task.FromResult(new ResourceChangeReadResponse([approved])))
+            .RegisterCapability<TeamRosterRequest, TeamRosterResponse>(
+                ProductManagerProfile.TeamRosterCapability,
+                (_, _) => Task.FromResult(new TeamRosterResponse(team)))
+            .RegisterCapability<object, OrganizationSnapshotResponse>(
+                PlatformCapabilities.OrganizationSnapshotRead,
+                (_, _) => Task.FromResult(organization))
+            .RegisterCapability<WorkBoardListRequest, IReadOnlyList<WorkBoardSummary>>(
+                WorkBoardCapabilities.Read,
+                (_, _) => Task.FromResult<IReadOnlyList<WorkBoardSummary>>([board]))
+            .RegisterCapability<WorkBoardReference, WorkBoardDetail>(
+                WorkItemCapabilities.Read,
+                (_, _) => Task.FromResult(new WorkBoardDetail(board, columns, [])))
+            .RegisterCapability<ConfigureSoftwareOrchestrationTemplateRequest, WorkOrchestrationPolicyRevision>(
+                WorkOrchestrationCapabilities.ConfigureSoftwareTemplate,
+                (request, _) => Task.FromResult(new WorkOrchestrationPolicyRevision(
+                    Guid.NewGuid(), Guid.NewGuid(), request.BoardId, 1, "Software delivery", "ready",
+                    request.MergeMode, new WorkOrchestrationConcurrencyLimits(100, 25, 10, 5, 1),
+                    [], [], true, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow)))
+            .RegisterCapability<object, PersonalTodoDirectory>(
+                PersonalTodoCapabilities.Read,
+                (_, _) => Task.FromResult(commitment is null
+                    ? new PersonalTodoDirectory([], productManagerId)
+                    : new PersonalTodoDirectory([
+                        new PersonalTodoBoard(personalBoardId, productManagerId, "Product Manager", managerId,
+                            "Manager", 1, [commitment])
+                    ], productManagerId)))
+            .RegisterCapability<AddPersonalTodoItemRequest, PersonalTodoItem>(
+                PersonalTodoCapabilities.Add,
+                (request, _) =>
+                {
+                    addedCommitment = request;
+                    commitment ??= new PersonalTodoItem(
+                        Guid.NewGuid(), personalBoardId, productManagerId, productManagerId, "Product Manager",
+                        request.Title, request.Description ?? string.Empty, PersonalTodoStatuses.Running,
+                        request.Priority, 1024, 1, request.DueDate, request.SourceConversationId,
+                        request.SourceMessageId, [], null, null, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow)
+                    {
+                        CorrelationId = request.CorrelationId
+                    };
+                    return Task.FromResult(commitment);
+                })
+            .RegisterCapability<JsonElement, object>(
+                CommunicationCapabilities.ChatRead,
+                (request, _) => Task.FromResult(request.TryGetProperty("chatId", out var chatIdProperty)
+                    ? (object)new CommunicationMessages([readiness])
+                    : new CommunicationHub(productManagerId, productManagerId, false, true, [direct])))
+            .RegisterCapability<ListAgentCoordinationRequest, AgentCoordinationSessions>(
+                CommunicationCapabilities.CoordinationList,
+                (_, _) => Task.FromResult(new AgentCoordinationSessions(
+                    session is null ? [] : [session])))
+            .RegisterCapability<StartAgentCoordinationRequest, AgentCoordinationSession>(
+                CommunicationCapabilities.CoordinationStart,
+                (request, _) =>
+                {
+                    coordinationStarts.Add(request);
+                    session ??= new AgentCoordinationSession(
+                        Guid.NewGuid(), request.SourceConversationId, request.SourceConversationId,
+                        request.SourceChatTurnId, request.SourceMessageId,
+                        new AgentCoordinationParticipant(productManagerId, productManagerInstallationId,
+                            "Product Manager", "Software Product Manager"),
+                        new AgentCoordinationParticipant(architectId, architectInstallationId,
+                            "Software Architect", "Software Architect"),
+                        request.Subject, request.Objective, request.SuccessCriteria,
+                        AgentCoordinationStatuses.Active, 1, 1, architectId, false, null,
+                        DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, []);
+                    return Task.FromResult(session);
+                })
+            .RegisterCapability<CommunicationSendCapture, CommunicationMessage>(
+                CommunicationCapabilities.MessageSend,
+                (request, _) =>
+                {
+                    sentMessages.Add(request);
+                    return Task.FromResult(SentMessage(request));
+                });
+        var context = runtime.CreateContext(
+            organizationId.ToString("D"), productManagerInstallationId.ToString("D"));
+        var agent = new ProductManagerAgent(
+            NullLogger<ProductManagerAgent>.Instance,
+            new ProductManagerOrchestrator(NullLogger<ProductManagerOrchestrator>.Instance));
+        var now = DateTimeOffset.UtcNow;
+        var review = new AgentAttentionReviewContext(
+            Guid.NewGuid(), now, now.AddMinutes(5), AgentAttentionReasons.Recovered);
+
+        await agent.HandleAttentionReviewAsync(review, context, CancellationToken.None);
+        await agent.HandleAttentionReviewAsync(review, context, CancellationToken.None);
+        var firstResult = await agent.HandlePersonalTodoAsync(commitment!, context, CancellationToken.None);
+        var replayResult = await agent.HandlePersonalTodoAsync(commitment!, context, CancellationToken.None);
+
+        Assert.NotNull(addedCommitment);
+        Assert.Equal($"product-architect-planning:{teamId:N}", commitment!.CorrelationId);
+        Assert.NotNull(firstResult);
+        Assert.NotNull(replayResult);
+        var start = Assert.Single(coordinationStarts);
+        Assert.Equal(readinessMessageId, start.SourceMessageId);
+        Assert.Equal(readinessTurnId, start.SourceChatTurnId);
+        Assert.Equal($"product-architect-planning:{teamId:N}", start.IdempotencyKey);
+        var acknowledgement = Assert.Single(sentMessages, x =>
+            x.IdempotencyKey == $"planning-readiness-ack:{teamId:N}");
+        Assert.Equal(chatId, acknowledgement.ChatId);
+        Assert.Contains("Welcome aboard", acknowledgement.Content, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1164,23 +1353,11 @@ What level of prototype fidelity are we aiming for?
         await agent.HandleHiringRecommendationFulfilledAsync(fulfilled, context, CancellationToken.None);
         await agent.HandleHiringRecommendationFulfilledAsync(fulfilled, context, CancellationToken.None);
 
-        var kickoffKeys = messages
-            .Where(x => x.IdempotencyKey == $"software-team-architect-reconcile:{teamId:N}:d1:q1")
-            .ToList();
-        Assert.Equal(2, kickoffKeys.Count);
-        Assert.Single(kickoffKeys.Select(x => x.IdempotencyKey).Distinct());
-        Assert.All(kickoffKeys, x =>
-        {
-            Assert.StartsWith("Planning staffing update:", x.Content, StringComparison.Ordinal);
-            Assert.DoesNotContain("<software_team_planning_kickoff>", x.Content, StringComparison.Ordinal);
-            Assert.DoesNotContain(requestId.ToString("D"), x.Content, StringComparison.OrdinalIgnoreCase);
-            Assert.Contains("one focused product blocker", x.Content, StringComparison.OrdinalIgnoreCase);
-        });
-        Assert.Contains(createdChats, x => x.IsDirect && x.ParticipantOrganizationUserIds.SequenceEqual([architectId]));
-        Assert.Equal(2, coordinationRequests.Count);
-        Assert.Single(coordinationRequests.Select(x => x.IdempotencyKey).Distinct(StringComparer.Ordinal));
-        Assert.All(coordinationRequests, x =>
-            Assert.Equal($"product-architect-planning:{teamId:N}", x.IdempotencyKey));
+        Assert.DoesNotContain(messages, x =>
+            x.IdempotencyKey == $"software-team-architect-reconcile:{teamId:N}:d1:q1");
+        Assert.Empty(coordinationRequests);
+        Assert.DoesNotContain(createdChats, x =>
+            x.IsDirect && x.ParticipantOrganizationUserIds.SequenceEqual([architectId]));
     }
 
     [Fact]

@@ -3,7 +3,7 @@
   "kind": "agent",
   "id": "com.csweet.product-manager",
   "name": "C-Sweet Software Product Manager",
-  "version": "2.5.4",
+  "version": "2.5.5",
   "publisher": {
     "id": "com.csweet",
     "name": "C-Sweet"
@@ -13,6 +13,7 @@
     "projectPath": "src/CSweet.Agent.SoftwareProductManager/CSweet.Agent.SoftwareProductManager.csproj",
     "targetFramework": "net10.0",
     "defaultActivationMode": "AlwaysOn",
+    "defaultTickFrequencySeconds": 300,
     "supportsMultipleInstallations": true,
     "maximumConcurrentJobs": 1
   },
@@ -518,6 +519,7 @@
     { "name": "work.personal-todo.complete.v1", "scope": "organization", "purpose": "SDK-managed personal work completion" },
     { "name": "work.personal-todo.block.v1", "scope": "organization", "purpose": "SDK-managed durable personal work blocking" },
     { "name": "work.personal-todo.release.v1", "scope": "organization", "purpose": "SDK-managed personal work release" },
+    { "name": "work.personal-todo.defer.v1", "scope": "organization", "purpose": "Durably wait until the next natural review without visible chatter" },
     {
       "name": "platform.team-roster.read.v1",
       "scope": "team",
@@ -542,6 +544,8 @@
     { "name": "communication.coordination.start.v1", "scope": "team", "purpose": "Start the one durable PM-Architect planning collaboration" },
     { "name": "communication.coordination.respond.v1", "scope": "team", "purpose": "Submit one structured product collaboration disposition" },
     { "name": "communication.coordination.read.v1", "scope": "team", "purpose": "Read the PM-Architect collaboration session" },
+    { "name": "communication.coordination.list.v1", "scope": "team", "purpose": "List the Product Manager's own planning sessions for deterministic recovery" },
+    { "name": "communication.coordination.resume.v1", "scope": "team", "purpose": "Resume a failed Product Manager-initiated planning session" },
     { "name": "communication.coordination.cancel.v1", "scope": "team", "purpose": "Stop an authorized PM-Architect collaboration" },
     { "name": "platform.management.resource-change.propose.v1", "scope": "organization", "purpose": "Propose one atomic desired-team snapshot to the current manager" },
     { "name": "platform.management.resource-change.read.v1", "scope": "organization", "purpose": "Read the Software Product Manager's resource-change requests and decisions" },
@@ -571,6 +575,7 @@
       "com.csweet.agent.onboarded.v1",
       "com.csweet.user.message.received.v1",
       "com.csweet.agent.coordination.turn-requested.v1",
+      "com.csweet.agent.attention.review-due.v1",
       "com.csweet.management.review.due.v1",
       "com.csweet.management.resource-change.decided.v1",
       "com.csweet.hiring-recommendation.fulfilled.v1"

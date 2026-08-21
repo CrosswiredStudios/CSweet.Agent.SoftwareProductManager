@@ -1,7 +1,7 @@
 # C-Sweet Software Product Manager
 
-First-party Software Product Manager agent for C-Sweet, built on `CSweet.Agent.SDK` 3.10.0 and manifest protocol v2.
-The agent package version is `2.5.4`.
+First-party Software Product Manager agent for C-Sweet, built on `CSweet.Agent.SDK` 3.11.0 and manifest protocol v2.
+The agent package version is `2.5.5`.
 
 It owns product outcomes, customer discovery, product strategy, prioritization, roadmaps, requirements, success measures, delivery alignment, and product-team design. It does not choose technical architecture, write production code, make legal conclusions, source candidates, hire workers, or spend money.
 
@@ -35,10 +35,11 @@ platform calls and model tools always reflect the current grant revision.
 
 Chief of Staff coordination uses install-time, same-organization capability bindings between active agents that share the same CEO. The Chief acts as executive liaison rather than line manager. Payload identities remain untrusted and neither agent can select a target installation. Provider credentials and runtime transport details never enter agent code.
 
-Software Architect coordination uses the same governed provider-binding model. As soon as every
-approved role is filled and the team board is ready, the Product Manager sends the designated
-Architect an idempotent delivery-planning kickoff. Once product goals, requirements, acceptance
-criteria, and constraints are ready, the Product Manager requests a typed architecture draft,
+Software Architect coordination uses the same governed provider-binding model. As soon as an
+approved team has an active Product Manager and Architect, the Architect sends one idempotent
+onboarding-readiness message. The Product Manager acknowledges that inbound turn and starts one
+durable planning session; Developer and QA hiring are not prerequisites. Once product goals,
+requirements, acceptance criteria, and constraints are ready, the Product Manager requests a typed architecture draft,
 reviews it for product alignment, resolves blocking questions through the private direct agent
 conversation, and explicitly invokes the separate
 publication capability only after approval and repository/base-branch selection. Repository
@@ -49,6 +50,11 @@ An explicit direct message from the active Software Architect is an actionable p
 The Product Manager reconciles the board, reads its actual manager conversation for authoritative
 repository and product decisions, and advances architecture publication and sprint readiness until
 a real governance decision is missing.
+
+The manifest requests a five-minute **Think every** cadence. Platform-issued attention reviews
+reconcile durable PM–Architect commitments without calling the model when no work is actionable.
+Waiting commitments stay silent for 30 minutes and escalate through the reporting chain after two
+hours; runtime failures resume through public coordination recovery capabilities.
 
 When an executive finalizes a product-team recommendation outside the Software Product Manager's reporting
 conversation, the runtime resolves the CEO manager and routes the atomic resource-change request
@@ -62,7 +68,7 @@ dotnet build CSweet.Agent.SoftwareProductManager.slnx
 dotnet test CSweet.Agent.SoftwareProductManager.slnx
 ```
 
-Requirements are .NET 10, `CSweet.Agent.SDK` 3.10.0, `CSweet.Memory`, an approved protocol-v2 installation, an active managing employee, and the grants in [GRANTS.md](GRANTS.md).
+Requirements are .NET 10, `CSweet.Agent.SDK` 3.11.0, `CSweet.Memory`, an approved protocol-v2 installation, an active managing employee, and the grants in [GRANTS.md](GRANTS.md).
 
 ## SDK 1.1.1 authoring contract
 

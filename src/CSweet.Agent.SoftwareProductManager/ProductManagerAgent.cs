@@ -19,6 +19,9 @@ public sealed class ProductManagerAgent : CSweetAgentBase
     private const string EnsureSoftwareTeamBoardToolName = "ensure_software_team_board";
     internal const string TerminalResourceChangeChunkKind = "terminal-resource-change";
     internal const string ResourceChangeRequestIdMetadataKey = "resourceChangeRequestId";
+    private const string PlanningCommitmentPrefix = "product-architect-planning:";
+    private static readonly TimeSpan CoworkerFollowUpDelay = TimeSpan.FromMinutes(30);
+    private static readonly TimeSpan ReportingChainEscalationDelay = TimeSpan.FromHours(2);
 
     private readonly IAgentLlmClientFactory? _llmClientFactory;
     private readonly ILogger<ProductManagerAgent> _logger;
@@ -76,6 +79,10 @@ public sealed class ProductManagerAgent : CSweetAgentBase
     public override async Task<PersonalTodoResult> HandlePersonalTodoAsync(
         PersonalTodoItem item, AgentRuntimeContext context, CancellationToken cancellationToken)
     {
+        if (TryReadPlanningCommitment(item, out var teamId))
+            return await ReconcilePlanningCommitmentAsync(
+                item, teamId, context, cancellationToken);
+
         var authoritativeRecipients = item.Mentions
             .GroupBy(x => x.OrganizationUserId)
             .Select(x => x.First())
@@ -131,6 +138,220 @@ or denied. Otherwise perform the task and return a concise completion summary.
             ? PersonalTodoResult.Blocked(response.Response[8..].Trim())
             : PersonalTodoResult.Completed(response.Response);
     }
+
+    public override async Task HandleAttentionReviewAsync(
+        AgentAttentionReviewContext review,
+        AgentRuntimeContext context,
+        CancellationToken cancellationToken)
+    {
+        if (!Guid.TryParse(context.InstallationId, out var installationId))
+            return;
+        var roster = await ReadCompleteTeamRosterAsync(context, cancellationToken);
+        if (roster.Team is null || !Guid.TryParse(roster.Team.TeamId, out var teamId))
+            return;
+        var approved = await context.Platform.ReadResourceChangesAsync(
+            new ResourceChangeReadRequest(Statuses: ["Approved"]), cancellationToken);
+        var request = approved.Requests
+            .Where(x => x.TeamId == teamId && x.RequesterInstallationId == installationId)
+            .OrderByDescending(x => x.DecidedAt ?? x.CreatedAt)
+            .FirstOrDefault();
+        if (request is null)
+            return;
+
+        _ = await EnsureSoftwareTeamBoardAsync(request, roster.Team, context, cancellationToken);
+        var correlationId = $"{PlanningCommitmentPrefix}{teamId:N}";
+        var directory = await context.Platform.PersonalTodo.ListAsync(cancellationToken);
+        var existing = directory.Boards.SelectMany(x => x.Items).FirstOrDefault(x =>
+            string.Equals(x.CorrelationId, correlationId, StringComparison.Ordinal) &&
+            x.ArchivedAt is null);
+        if (existing is not null)
+            return;
+
+        _ = await context.Platform.PersonalTodo.AddAsync(
+            new AddPersonalTodoItemRequest(
+                "Complete PM–Architect planning",
+                "Reconcile the approved product plan with the Software Architect and publish the provisional backlog.",
+                "High",
+                null,
+                $"planning-commitment:{teamId:N}",
+                CorrelationId: correlationId),
+            cancellationToken);
+    }
+
+    private async Task<PersonalTodoResult> ReconcilePlanningCommitmentAsync(
+        PersonalTodoItem item,
+        Guid teamId,
+        AgentRuntimeContext context,
+        CancellationToken cancellationToken)
+    {
+        if (!Guid.TryParse(context.InstallationId, out var installationId))
+            return PersonalTodoResult.Blocked("The Product Manager installation identity is unavailable.");
+        var roster = await ReadCompleteTeamRosterAsync(context, cancellationToken);
+        if (roster.Team is null || !Guid.TryParse(roster.Team.TeamId, out var currentTeamId) || currentTeamId != teamId)
+            return PersonalTodoResult.Blocked("The approved team roster is unavailable or changed.");
+        var approved = await context.Platform.ReadResourceChangesAsync(
+            new ResourceChangeReadRequest(Statuses: ["Approved"]), cancellationToken);
+        var request = approved.Requests
+            .Where(x => x.TeamId == teamId && x.RequesterInstallationId == installationId)
+            .OrderByDescending(x => x.DecidedAt ?? x.CreatedAt)
+            .FirstOrDefault();
+        if (request is null)
+            return PersonalTodoResult.Blocked("The approved product-team request is unavailable.");
+
+        var operatingContext = await _orchestrator.AssembleContextAsync(context, cancellationToken);
+        var organization = operatingContext.Organization;
+        var self = organization?.People.SingleOrDefault(x =>
+            x.AgentInstallationId == installationId && x.IsActive);
+        if (self is null)
+            return PersonalTodoResult.Blocked("The Product Manager employee identity is unavailable.");
+        var architects = ActiveTeamAgentsForRole(roster.Team, organization!, "Software Architect")
+            .Where(x => x.ReportsToId == self.Id)
+            .ToList();
+        if (architects.Count != 1)
+            return PersonalTodoResult.WaitingUntil(
+                DateTimeOffset.UtcNow.Add(CoworkerFollowUpDelay),
+                "Waiting for exactly one active Software Architect reporting to the Product Manager.");
+        var architect = architects[0];
+        var boardDetail = await EnsureSoftwareTeamBoardAsync(request, roster.Team, context, cancellationToken);
+
+        var hub = await context.Platform.Communication.ReadHubAsync(cancellationToken);
+        var direct = hub.Chats.SingleOrDefault(x => x.IsDirect &&
+            x.Participants.Count == 2 &&
+            x.Participants.Any(p => p.OrganizationUserId == self.Id) &&
+            x.Participants.Any(p => p.OrganizationUserId == architect.Id));
+        if (direct is null)
+        {
+            _ = await context.Platform.Communication.SendDirectMessageAsync(
+                architect.Id,
+                "I’m ready to begin product and backlog planning. Please confirm when your onboarding is complete.",
+                $"planning-readiness-check:{teamId:N}",
+                cancellationToken);
+            return PersonalTodoResult.WaitingUntil(
+                DateTimeOffset.UtcNow.Add(CoworkerFollowUpDelay),
+                "Waiting for the Software Architect's onboarding readiness response.", architect.Id);
+        }
+
+        var messages = await context.Platform.Communication.ReadChatAsync(direct.Id, cancellationToken);
+        var readiness = messages.Messages
+            .Where(x => x.SenderOrganizationUserId == architect.Id && x.ChatTurnId.HasValue &&
+                IsArchitectReadinessMessage(x.Content))
+            .OrderBy(x => x.CreatedAt)
+            .FirstOrDefault();
+        var sessions = (await context.Platform.Communication.ListCoordinationAsync(
+                direct.Id, activeOnly: false, cancellationToken))
+            .Sessions
+            .Where(x => x.Initiator.OrganizationUserId == self.Id &&
+                x.Target.OrganizationUserId == architect.Id &&
+                x.SourceConversationId == direct.Id)
+            .OrderByDescending(x => x.UpdatedAt)
+            .ToList();
+
+        var session = sessions.FirstOrDefault();
+        if (session is null && readiness is null)
+        {
+            _ = await context.Platform.Communication.SendMessageAsync(
+                direct.Id,
+                "I’m ready to begin product and backlog planning. Please confirm when your onboarding is complete.",
+                $"planning-readiness-check:{teamId:N}", cancellationToken);
+            return PersonalTodoResult.WaitingUntil(
+                DateTimeOffset.UtcNow.Add(CoworkerFollowUpDelay),
+                "Waiting for the Software Architect's onboarding readiness response.", architect.Id);
+        }
+
+        if (session is null)
+        {
+            var acknowledgement =
+                $"Welcome aboard. I’ve confirmed your onboarding and started our {boardDetail.Board.Name} planning session. " +
+                "I’ll own product outcomes and acceptance criteria; please own technical decomposition, dependencies, risks, and implementation sequence.";
+            session = await context.Platform.Communication.StartCoordinationAsync(
+                new StartAgentCoordinationRequest(
+                    architect.Id,
+                    $"{boardDetail.Board.Name} planning",
+                    request.ProductGoal,
+                    [
+                        "Product outcomes, priorities, requirements, acceptance criteria, and non-goals are explicit.",
+                        "Architecture supplies dependency order, risks, technical slices, and implementation sequencing.",
+                        "An undated, unestimated, unassigned provisional backlog is published before delivery staffing."
+                    ],
+                    acknowledgement,
+                    direct.Id,
+                    readiness!.ChatTurnId!.Value,
+                    readiness.Id,
+                    $"{PlanningCommitmentPrefix}{teamId:N}"),
+                cancellationToken);
+            _ = await context.Platform.Communication.SendMessageAsync(
+                direct.Id, acknowledgement,
+                $"planning-readiness-ack:{teamId:N}", cancellationToken);
+        }
+        else if (session.Status == AgentCoordinationStatuses.Failed)
+        {
+            session = await context.Platform.Communication.ResumeCoordinationAsync(
+                session.Id,
+                session.Revision,
+                "Recovering a failed runtime or transport turn during the durable planning review.",
+                $"planning-resume:{teamId:N}:{session.Revision}",
+                cancellationToken);
+        }
+
+        if (session.Status == AgentCoordinationStatuses.Completed && boardDetail.Items.Count > 0)
+            return PersonalTodoResult.Completed("The provisional PM–Architect backlog is published.");
+        if (session.Status is AgentCoordinationStatuses.Blocked or AgentCoordinationStatuses.Cancelled)
+            return PersonalTodoResult.Blocked(session.FinalSummary ?? "Product planning reached an authoritative terminal decision.");
+
+        var now = DateTimeOffset.UtcNow;
+        var architectOwesTurn = session.CurrentOrganizationUserId == architect.Id;
+        if (architectOwesTurn && now - session.UpdatedAt >= ReportingChainEscalationDelay)
+        {
+            var escalation = await EscalateToChiefAsync(
+                "architecture-planning-response",
+                $"The Software Architect has not advanced the {boardDetail.Board.Name} planning session for two hours. What direction should the team follow?",
+                "The provisional backlog cannot be delegated until product and architecture planning advances.",
+                new AssistantCapabilityInput(
+                    Settings.GetGuid("llmProviderId") ?? Guid.Empty,
+                    direct.Id.ToString("D"),
+                    "Durable planning escalation.",
+                    null,
+                    architect.Id.ToString("D"),
+                    readiness?.Id ?? item.Id,
+                    readiness?.ChatTurnId ?? Guid.Empty),
+                operatingContext,
+                context,
+                cancellationToken);
+            _ = await context.Platform.Communication.SendMessageAsync(
+                direct.Id,
+                $"Planning remains blocked after two hours, so I escalated it through the reporting chain. {escalation.Message}",
+                $"planning-escalation-notice:{teamId:N}:{session.Id:N}", cancellationToken);
+        }
+        else if (architectOwesTurn && now - session.UpdatedAt >= CoworkerFollowUpDelay)
+        {
+            _ = await context.Platform.Communication.SendMessageAsync(
+                direct.Id,
+                "Quick follow-up on our planning session: please send the next focused question or decomposition update when ready.",
+                $"planning-follow-up:{teamId:N}:{session.Id:N}", cancellationToken);
+        }
+
+        return PersonalTodoResult.WaitingUntil(
+            now.Add(CoworkerFollowUpDelay),
+            architectOwesTurn
+                ? "Waiting for the Software Architect's next planning turn."
+                : "Waiting for the durable coordination session to advance.",
+            architectOwesTurn ? architect.Id : null);
+    }
+
+    private static bool TryReadPlanningCommitment(PersonalTodoItem item, out Guid teamId)
+    {
+        teamId = Guid.Empty;
+        if (item.CorrelationId is null ||
+            !item.CorrelationId.StartsWith(PlanningCommitmentPrefix, StringComparison.Ordinal))
+            return false;
+        return Guid.TryParseExact(item.CorrelationId[PlanningCommitmentPrefix.Length..], "N", out teamId);
+    }
+
+    private static bool IsArchitectReadinessMessage(string content) =>
+        content.Contains("ready", StringComparison.OrdinalIgnoreCase) &&
+        (content.Contains("onboard", StringComparison.OrdinalIgnoreCase) ||
+         content.Contains("begin", StringComparison.OrdinalIgnoreCase) ||
+         content.Contains("start", StringComparison.OrdinalIgnoreCase));
 
     private static bool IsJokeDeliveryTask(PersonalTodoItem item)
     {
@@ -842,78 +1063,7 @@ Retry now. The ensure_software_team_board tool is required. Use its structured r
         if (roster.Team is not null && architectCovered)
         {
             _ = await EnsureSoftwareTeamBoardAsync(request, roster.Team, context, cancellationToken);
-            if (NormalizeRoleIdentity(fulfilled.RoleTitle) !=
-                NormalizeRoleIdentity("Software Architect"))
-                await StartSoftwareTeamCollaborationAsync(
-                    request, roster.Team, content, context, cancellationToken);
         }
-    }
-
-    private async Task StartSoftwareTeamCollaborationAsync(
-        ResourceChangeRequestResponse request,
-        AgentTeamContext team,
-        string hiringStatus,
-        AgentRuntimeContext context,
-        CancellationToken cancellationToken)
-    {
-        if (!Guid.TryParse(team.TeamId, out var teamId) ||
-            !Guid.TryParse(context.InstallationId, out var installationId))
-            throw new InvalidOperationException("The approved software team identity is invalid.");
-        var operatingContext = await _orchestrator.AssembleContextAsync(context, cancellationToken);
-        var organization = operatingContext.Organization
-            ?? throw new InvalidOperationException(
-                "The organization snapshot is required to reconcile product planning.");
-        var self = organization.People.SingleOrDefault(x =>
-            x.AgentInstallationId == installationId && x.IsActive)
-            ?? throw new InvalidOperationException(
-                "The Software Product Manager does not have an active employee identity.");
-        var boardDetail = await EnsureSoftwareTeamBoardAsync(
-            request, team, context, cancellationToken);
-        var board = boardDetail.Board;
-        var architects = ActiveTeamAgentsForRole(team, organization, "Software Architect");
-        var developers = ActiveTeamMembersForRole(team, organization, "Software Developer");
-        var quality = ActiveTeamMembersForRole(team, organization, "Software QA");
-        if (architects.Count != 1)
-        {
-            var blocker = architects.Count == 0
-                ? "Planning is waiting for one active Software Architect installation."
-                : "Planning is waiting for one designated Software Architect because multiple active candidates match the role.";
-            _ = await context.Platform.Communication.SendMessageAsync(
-                request.ConversationId, blocker,
-                $"software-team-planning-manager-blocker:{teamId:N}", cancellationToken);
-            return;
-        }
-
-        var architectureKickoff = $"""
-Planning staffing update: {hiringStatus}
-
-Please reconcile the {board.Name} backlog for the approved product goal. We currently have
-{developers.Count} active Developer(s) and {quality.Count} active QA teammate(s). Keep provisional
-work undated and unestimated. Add repository delivery details and development assignments only
-when authoritative; QA may remain unassigned until hired. Raise one focused product blocker at a time.
-""";
-        var architectDispatch = await context.Platform.Communication.SendDirectAgentMessageAsync(
-            architects[0].Id,
-            architectureKickoff,
-            $"software-team-architect-reconcile:{teamId:N}:d{developers.Count}:q{quality.Count}",
-            cancellationToken);
-        _ = await context.Platform.Communication.StartCoordinationAsync(
-            new StartAgentCoordinationRequest(
-                architects[0].Id,
-                $"{board.Name} planning",
-                request.ProductGoal,
-                [
-                    "Product requirements, priorities, acceptance criteria, and non-goals are explicit.",
-                    "Architecture defines bounded sprints, dependencies, constraints, failure behavior, and testable Stories and Tasks.",
-                    "Planning-only Backlog tickets remain provisional until repository details and staffing are authoritative.",
-                    "No execution is dispatched until the Product Manager explicitly starts the selected sprint."
-                ],
-                architectureKickoff,
-                architectDispatch.ChatId,
-                architectDispatch.RecipientChatTurnId,
-                architectDispatch.MessageId,
-                $"product-architect-planning:{teamId:N}"),
-            cancellationToken);
     }
 
     private static IReadOnlyList<OrganizationPerson> ActiveTeamAgentsForRole(
