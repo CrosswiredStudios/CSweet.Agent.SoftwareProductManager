@@ -20,7 +20,8 @@ public sealed class ProductManagerAgent : CSweetAgentBase
     internal const string TerminalResourceChangeChunkKind = "terminal-resource-change";
     internal const string ResourceChangeRequestIdMetadataKey = "resourceChangeRequestId";
     private const string PlanningCommitmentPrefix = "product-architect-planning:";
-    private const string RefinementCommitmentPrefix = "product-architect-refinement:";
+    private const string SprintReadinessCommitmentPrefix = "product-sprint-readiness:";
+    private static readonly TimeSpan InternalReviewDelay = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan CoworkerFollowUpDelay = TimeSpan.FromMinutes(30);
     private static readonly TimeSpan ReportingChainEscalationDelay = TimeSpan.FromHours(2);
 
@@ -83,9 +84,9 @@ public sealed class ProductManagerAgent : CSweetAgentBase
         if (TryReadPlanningCommitment(item, out var teamId))
             return await ReconcilePlanningCommitmentAsync(
                 item, teamId, context, cancellationToken);
-        if (TryReadRefinementCommitment(item, out var boardId, out var startedSprintId))
-            return await ReconcileRollingRefinementAsync(
-                item, boardId, startedSprintId, context, cancellationToken);
+        if (TryReadSprintReadinessCommitment(item, out var boardId, out var sprintId))
+            return await ReconcileSprintReadinessAsync(
+                item, boardId, sprintId, context, cancellationToken);
 
         var authoritativeRecipients = item.Mentions
             .GroupBy(x => x.OrganizationUserId)
@@ -163,15 +164,47 @@ or denied. Otherwise perform the task and return a concise completion summary.
             return;
 
         _ = await EnsureSoftwareTeamBoardAsync(request, roster.Team, context, cancellationToken);
+        _ = await EnsurePlanningCommitmentAsync(
+            teamId, wakeExisting: true, context, cancellationToken);
+    }
+
+    private static async Task<PersonalTodoItem> EnsurePlanningCommitmentAsync(
+        Guid teamId,
+        bool wakeExisting,
+        AgentRuntimeContext context,
+        CancellationToken cancellationToken)
+    {
         var correlationId = $"{PlanningCommitmentPrefix}{teamId:N}";
         var directory = await context.Platform.PersonalTodo.ListAsync(cancellationToken);
         var existing = directory.Boards.SelectMany(x => x.Items).FirstOrDefault(x =>
             string.Equals(x.CorrelationId, correlationId, StringComparison.Ordinal) &&
             x.ArchivedAt is null);
         if (existing is not null)
-            return;
+        {
+            if (wakeExisting && existing.Status is PersonalTodoStatuses.Backlog or PersonalTodoStatuses.Blocked)
+            {
+                try
+                {
+                    return await context.Platform.PersonalTodo.RequeueAsync(
+                        new RequeuePersonalTodoItemRequest(
+                            existing.Id,
+                            existing.Revision,
+                            $"planning-commitment-wake:{teamId:N}:{existing.Revision}"),
+                        cancellationToken);
+                }
+                catch (PlatformCapabilityException exception)
+                    when (exception.Code == PlatformCapabilityErrorCode.Conflict)
+                {
+                    var refreshed = await context.Platform.PersonalTodo.ListAsync(cancellationToken);
+                    return refreshed.Boards.SelectMany(x => x.Items).Single(x =>
+                        string.Equals(x.CorrelationId, correlationId, StringComparison.Ordinal) &&
+                        x.ArchivedAt is null);
+                }
+            }
+            return existing;
+        }
 
-        _ = await context.Platform.PersonalTodo.AddAsync(
+        return await context.Platform.PersonalTodo.AddAsync(
             new AddPersonalTodoItemRequest(
                 "Complete PM–Architect planning",
                 "Reconcile the approved product plan with the Software Architect and publish the provisional backlog.",
@@ -267,10 +300,10 @@ or denied. Otherwise perform the task and return a concise completion summary.
             var acknowledgement = $"""
 Welcome aboard. I’ve confirmed your onboarding and started our {boardDetail.Board.Name} planning session.
 Outcome: {request.ProductGoal}
-I’ll own product scope, priorities, requirements, acceptance criteria, and sprint activation. Please
-organize the complete known scope into outcome Epics and sprint-grouped Stories, then fully decompose
-the next two planned sprints into dependency-ordered Tasks. Keep all tickets in Backlog and leave
-dates, estimates, repository details, and assignments unset until authoritative.
+I’ll own product scope, priorities, requirements, acceptance criteria, publication approval, and sprint
+activation. Start by proposing the outcome Epics that cover the approved goal. We will then review
+Stories and planned sprint groupings before you fully decompose every Story into junior-ready Tasks.
+Keep all tickets in Backlog and leave dates, estimates, repository details, and assignments unset until authoritative.
 """;
             session = await context.Platform.Communication.StartCoordinationAsync(
                 new StartAgentCoordinationRequest(
@@ -289,8 +322,8 @@ dates, estimates, repository details, and assignments unset until authoritative.
                     $"{PlanningCommitmentPrefix}{teamId:N}"),
                 cancellationToken);
         }
-        else if (session.Status == AgentCoordinationStatuses.Failed ||
-                 session.Status == AgentCoordinationStatuses.Blocked &&
+        else if ((session.Status == AgentCoordinationStatuses.Failed ||
+                  session.Status == AgentCoordinationStatuses.Blocked) &&
                  IsRecoverablePlanningFailure(session.FinalSummary))
         {
             try
@@ -314,8 +347,16 @@ dates, estimates, repository details, and assignments unset until authoritative.
                 cancellationToken);
         }
 
-        if (session.Status == AgentCoordinationStatuses.Completed && boardDetail.Items.Count > 0)
-            return PersonalTodoResult.Completed("The provisional PM–Architect backlog is published.");
+        if (session.Status == AgentCoordinationStatuses.Completed)
+        {
+            var verification = await VerifyPublishedBacklogAsync(
+                boardDetail.Board.Id, context, cancellationToken);
+            if (verification.IsComplete)
+                return PersonalTodoResult.Completed(verification.Summary);
+            return PersonalTodoResult.WaitingUntil(
+                DateTimeOffset.UtcNow.Add(InternalReviewDelay),
+                $"Backlog verification is incomplete: {verification.Summary}");
+        }
         if (session.Status is AgentCoordinationStatuses.Blocked or AgentCoordinationStatuses.Cancelled)
             return PersonalTodoResult.Blocked(session.FinalSummary ?? "Product planning reached an authoritative terminal decision.");
 
@@ -352,7 +393,7 @@ dates, estimates, repository details, and assignments unset until authoritative.
         }
 
         return PersonalTodoResult.WaitingUntil(
-            now.Add(CoworkerFollowUpDelay),
+            now.Add(InternalReviewDelay),
             architectOwesTurn
                 ? "Waiting for the Software Architect's next planning turn."
                 : "Waiting for the durable coordination session to advance.",
@@ -368,95 +409,82 @@ dates, estimates, repository details, and assignments unset until authoritative.
         return Guid.TryParseExact(item.CorrelationId[PlanningCommitmentPrefix.Length..], "N", out teamId);
     }
 
-    private static bool TryReadRefinementCommitment(
+    private static bool TryReadSprintReadinessCommitment(
         PersonalTodoItem item,
         out Guid boardId,
-        out Guid startedSprintId)
+        out Guid sprintId)
     {
-        boardId = startedSprintId = Guid.Empty;
+        boardId = sprintId = Guid.Empty;
         if (item.CorrelationId is null ||
-            !item.CorrelationId.StartsWith(RefinementCommitmentPrefix, StringComparison.Ordinal))
+            !item.CorrelationId.StartsWith(SprintReadinessCommitmentPrefix, StringComparison.Ordinal))
             return false;
-        var parts = item.CorrelationId[RefinementCommitmentPrefix.Length..].Split(':');
+        var parts = item.CorrelationId[SprintReadinessCommitmentPrefix.Length..].Split(':');
         return parts.Length == 2 &&
                Guid.TryParseExact(parts[0], "N", out boardId) &&
-               Guid.TryParseExact(parts[1], "N", out startedSprintId);
+               Guid.TryParseExact(parts[1], "N", out sprintId);
     }
 
-    private async Task<PersonalTodoResult> ReconcileRollingRefinementAsync(
+    private async Task<PersonalTodoResult> ReconcileSprintReadinessAsync(
         PersonalTodoItem item,
         Guid boardId,
-        Guid startedSprintId,
+        Guid sprintId,
         AgentRuntimeContext context,
         CancellationToken cancellationToken)
     {
-        var board = await context.Platform.Work.ReadBoardAsync(boardId, cancellationToken);
         var sprints = await context.Platform.Work.ListSprintsAsync(boardId, cancellationToken);
-        var plannedDetailedCount = sprints.Count(sprint =>
-            sprint.Status.Equals("Planned", StringComparison.OrdinalIgnoreCase) &&
-            board.Items.Any(work => work.SprintId == sprint.Id && work.Kind == WorkItemKinds.Task));
-        if (plannedDetailedCount >= 2)
-            return PersonalTodoResult.Completed("Two not-yet-started sprints already have detailed Tasks.");
+        var sprint = sprints.SingleOrDefault(x => x.Id == sprintId);
+        if (sprint is null)
+            return PersonalTodoResult.Blocked("The planned sprint no longer exists on the PM-managed board.");
+        if (!sprint.Status.Equals("Planned", StringComparison.OrdinalIgnoreCase))
+            return PersonalTodoResult.Completed($"Sprint {sprint.Name} is already {sprint.Status}.");
 
-        if (!board.Board.TeamId.HasValue)
-            return PersonalTodoResult.Blocked("The planning board is no longer assigned to an approved team.");
-        if (!Guid.TryParse(context.InstallationId, out var installationId))
-            return PersonalTodoResult.Blocked("The Product Manager installation identity is unavailable.");
-        var approved = await context.Platform.ReadResourceChangesAsync(
-            new ResourceChangeReadRequest(Statuses: ["Approved"]), cancellationToken);
-        var product = approved.Requests
-            .Where(x => x.TeamId == board.Board.TeamId && x.RequesterInstallationId == installationId)
-            .OrderByDescending(x => x.DecidedAt ?? x.CreatedAt)
-            .FirstOrDefault();
-        if (product is null)
-            return PersonalTodoResult.Blocked("The approved product context for rolling refinement is unavailable.");
-
-        var design = await context.Platform.InvokeAsync<ArchitectureDesignRequest, JsonElement>(
-            ProductManagerProfile.SoftwareArchitectureDesignCapability,
-            new ArchitectureDesignRequest(
-                boardId,
-                product.ProductGoal,
-                [product.ProductGoal],
-                product.Assumptions.Count > 0 ? product.Assumptions : [product.Rationale],
-                $"rolling-refinement:{boardId:N}:{startedSprintId:N}:design",
-                Constraints: product.Constraints.Concat(
-                [
-                    "Preserve every existing Epic, Story, Task, sprint grouping, and stable key.",
-                    "Add child Tasks only where needed to leave two not-yet-started Planned sprints detailed.",
-                    "Do not start a sprint, assign work, select a repository, or change completed or active work."
-                ]).ToArray())
-            {
-                RollingRefinement = true
-            },
-            cancellationToken);
-        if (TryReadFirstBlockingQuestion(design, out var blockingQuestion))
-            return PersonalTodoResult.Blocked(blockingQuestion);
-
-        _ = await PublishArchitectureDraftAsync(
+        var request = new StartWorkSprintExecutionRequest(
             boardId,
-            design,
-            "Rolling refinement preserves the approved outcome and existing board hierarchy.",
-            sprints.Count == 0 ? 1 : sprints.Min(x => x.Sequence ?? 1),
-            $"rolling-refinement:{boardId:N}:{startedSprintId:N}:publish",
-            new AssistantCapabilityInput(
-                Settings.GetGuid("llmProviderId") ?? Guid.Empty,
-                (item.SourceConversationId ?? item.Id).ToString("D"),
-                "Rolling two-sprint refinement.",
-                null,
-                MessageId: item.SourceMessageId ?? Guid.Empty),
-            context,
-            cancellationToken);
+            sprint.Id,
+            sprint.Revision,
+            $"pm-sprint-readiness:{boardId:N}:{sprint.Id:N}:start");
+        try
+        {
+            var preflight = await context.Platform.InvokeAsync<
+                StartWorkSprintExecutionRequest,
+                WorkSprintPreflightResult>(
+                ProductManagerProfile.PreflightSprintCapability,
+                request,
+                cancellationToken);
+            if (!preflight.IsValid)
+            {
+                var reason = preflight.Errors.FirstOrDefault()?.Message ??
+                             "The sprint is not yet eligible for PM activation.";
+                return PersonalTodoResult.WaitingUntil(
+                    DateTimeOffset.UtcNow.Add(CoworkerFollowUpDelay),
+                    $"Sprint readiness preflight is waiting: {reason}");
+            }
 
-        board = await context.Platform.Work.ReadBoardAsync(boardId, cancellationToken);
-        sprints = await context.Platform.Work.ListSprintsAsync(boardId, cancellationToken);
-        plannedDetailedCount = sprints.Count(sprint =>
-            sprint.Status.Equals("Planned", StringComparison.OrdinalIgnoreCase) &&
-            board.Items.Any(work => work.SprintId == sprint.Id && work.Kind == WorkItemKinds.Task));
-        return plannedDetailedCount >= 2
-            ? PersonalTodoResult.Completed("The rolling two-sprint detailed planning horizon is restored.")
-            : PersonalTodoResult.WaitingUntil(
+            _ = await context.Platform.InvokeAsync<StartWorkSprintExecutionRequest, JsonElement>(
+                ProductManagerProfile.StartSprintCapability,
+                request,
+                cancellationToken);
+            var next = sprints
+                .Where(candidate => candidate.Id != sprint.Id &&
+                    candidate.Status.Equals("Planned", StringComparison.OrdinalIgnoreCase))
+                .OrderBy(candidate => candidate.Sequence ?? int.MaxValue)
+                .FirstOrDefault();
+            if (next is not null)
+                await EnsureSprintReadinessCommitmentAsync(
+                    boardId, next.Id, context, cancellationToken);
+            return PersonalTodoResult.Completed(
+                $"The Product Manager explicitly started sprint {sprint.Name} after successful preflight.");
+        }
+        catch (PlatformCapabilityException exception)
+            when (exception.Code is PlatformCapabilityErrorCode.Unavailable or
+                  PlatformCapabilityErrorCode.NotFound or PlatformCapabilityErrorCode.Conflict)
+        {
+            _logger.LogInformation(exception,
+                "Sprint-readiness commitment {TodoId} is waiting on operational state.", item.Id);
+            return PersonalTodoResult.WaitingUntil(
                 DateTimeOffset.UtcNow.Add(CoworkerFollowUpDelay),
-                "Waiting for the architecture provider to complete rolling refinement.");
+                "Waiting for sprint readiness infrastructure or authoritative delivery state.");
+        }
     }
 
     private static bool IsArchitectReadinessMessage(string content) =>
@@ -469,7 +497,9 @@ dates, estimates, repository details, and assignments unset until authoritative.
         !string.IsNullOrWhiteSpace(summary) &&
         (summary.Contains("work.sprint.read", StringComparison.OrdinalIgnoreCase) ||
          summary.Contains("grant or platform capability", StringComparison.OrdinalIgnoreCase) ||
-         summary.Contains("runtime or transport", StringComparison.OrdinalIgnoreCase));
+         summary.Contains("runtime or transport", StringComparison.OrdinalIgnoreCase) ||
+         summary.Contains("agent-failure:v1", StringComparison.OrdinalIgnoreCase) ||
+         summary.Contains("The agent failed while processing the work item", StringComparison.OrdinalIgnoreCase));
 
     private static bool IsJokeDeliveryTask(PersonalTodoItem item)
     {
@@ -486,24 +516,35 @@ dates, estimates, repository details, and assignments unset until authoritative.
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        await WakePlanningCommitmentAsync(null, context, cancellationToken);
         var latest = request.Transcript.OrderByDescending(x => x.Ordinal).FirstOrDefault();
         if (request.IsFinalization)
             return AgentCoordinationTurnResult.Completed(
                 $"Product collaboration finalized. {latest?.Content ?? request.Objective}");
 
-        var hasPriorProductManagerTurn = request.Transcript.Any(x =>
-            x.SpeakerOrganizationUserId == request.Self.OrganizationUserId);
-        if (!hasPriorProductManagerTurn)
+        if (latest is null || latest.SpeakerOrganizationUserId == request.Self.OrganizationUserId)
+            return AgentCoordinationTurnResult.Continue(
+                "Please begin with an Epic proposal that covers the approved customer and product outcomes.");
+        if (latest.Content.StartsWith("Focused product question:", StringComparison.OrdinalIgnoreCase))
+            return AgentCoordinationTurnResult.Blocked(latest.Content);
+        if (latest.Content.StartsWith("Epic proposal:", StringComparison.OrdinalIgnoreCase))
         {
-            return AgentCoordinationTurnResult.Continue($"""
-Product framing for **{request.Subject}**:
-
-- Outcome: {request.Objective}
-- Success is measured against: {string.Join("; ", request.SuccessCriteria)}
-- I will own priority, acceptance criteria, and board reconciliation while preserving all approval and repository-selection gates.
-
-Architect: provide the dependency order, affected system boundaries, key quality/failure constraints, and the minimum independently testable ticket slices I should reconcile onto the board.
-""");
+            return AgentCoordinationTurnResult.Continue(
+                "I approve the outcome-Epic direction against the product goal. Now propose the Stories, " +
+                "dependency order, and planned sprint groupings that cover every approved requirement.");
+        }
+        if (latest.Content.StartsWith("Story and sprint proposal:", StringComparison.OrdinalIgnoreCase))
+        {
+            return AgentCoordinationTurnResult.Continue(
+                "I approve the Story scope, priorities, acceptance boundaries, and planned sprint grouping. " +
+                "Complete the technical Task decomposition for every Story, including failure behavior and verification evidence, then return it for publication approval.");
+        }
+        if (!latest.Content.StartsWith("Task decomposition complete:", StringComparison.OrdinalIgnoreCase))
+        {
+            // Older Architect versions returned a generic readiness statement at ordinal one.
+            // Recover the same durable session by requesting the first missing business stage.
+            return AgentCoordinationTurnResult.Continue(
+                "Let’s start the product plan with the outcome Epics. Propose concise Epics that collectively cover the approved goal and success criteria.");
         }
 
         try
@@ -548,7 +589,7 @@ Architect: provide the dependency order, affected system boundaries, key quality
                 null,
                 MessageId: session.SourceMessageId,
                 ChatTurnId: session.SourceChatTurnId);
-            _ = await PublishArchitectureDraftAsync(
+            var publication = await PublishArchitectureDraftAsync(
                 board.Id,
                 design,
                 "The plan aligns with the approved outcome and acceptance criteria.",
@@ -558,15 +599,20 @@ Architect: provide the dependency order, affected system boundaries, key quality
                 context,
                 cancellationToken);
 
+            var verification = await VerifyPublishedBacklogAsync(
+                board.Id, context, cancellationToken, publication);
+            if (!verification.IsComplete)
+                return AgentCoordinationTurnResult.Blocked(
+                    $"The architecture provider returned without a complete verifiable backlog: {verification.Summary}");
+
             var detail = await context.Platform.Work.ReadBoardAsync(board.Id, cancellationToken);
             var sprints = await context.Platform.Work.ListSprintsAsync(board.Id, cancellationToken);
-            var hasPublishedPlan = sprints.Count > 0 && detail.Items.Any(x =>
-                x.Kind is WorkItemKinds.Story or WorkItemKinds.Task &&
-                x.Planning is not null);
-            if (!hasPublishedPlan)
-                return AgentCoordinationTurnResult.Blocked(
-                    "The architecture provider returned without publishing a verifiable backlog.");
-
+            var earliest = publication.Sprints.OrderBy(x => x.Ordinal).FirstOrDefault();
+            if (earliest is not null)
+            {
+                await EnsureSprintReadinessCommitmentAsync(
+                    board.Id, earliest.SprintId, context, cancellationToken);
+            }
             var epics = detail.Items.Count(x => x.Kind == WorkItemKinds.Epic);
             var stories = detail.Items.Count(x => x.Kind == WorkItemKinds.Story);
             var tasks = detail.Items.Count(x => x.Kind == WorkItemKinds.Task);
@@ -603,6 +649,108 @@ Architect: provide the dependency order, affected system boundaries, key quality
             .FirstOrDefault(x => !string.IsNullOrWhiteSpace(x)) ?? string.Empty;
         return question.Length > 0;
     }
+
+    private static async Task<BacklogVerification> VerifyPublishedBacklogAsync(
+        Guid boardId,
+        AgentRuntimeContext context,
+        CancellationToken cancellationToken,
+        ArchitecturePublishResponse? expectedPublication = null)
+    {
+        var detail = await context.Platform.Work.ReadBoardAsync(boardId, cancellationToken);
+        var sprints = await context.Platform.Work.ListSprintsAsync(boardId, cancellationToken);
+        var backlog = detail.Columns.SingleOrDefault(x =>
+            x.Name.Equals("Backlog", StringComparison.OrdinalIgnoreCase));
+        if (backlog is null)
+            return new(false, "the PM-managed board has no Backlog column");
+        if (sprints.Count == 0 || sprints.Any(x =>
+                !x.Status.Equals("Planned", StringComparison.OrdinalIgnoreCase)))
+            return new(false, "every published sprint must exist in Planned state");
+
+        var epics = detail.Items.Where(x => x.Kind == WorkItemKinds.Epic).ToList();
+        var stories = detail.Items.Where(x => x.Kind == WorkItemKinds.Story).ToList();
+        var tasks = detail.Items.Where(x => x.Kind == WorkItemKinds.Task).ToList();
+        if (epics.Count == 0 || stories.Count == 0 || tasks.Count == 0)
+            return new(false, "at least one Epic, Story, and Task is required");
+        var epicIds = epics.Select(x => x.Id).ToHashSet();
+        var storyById = stories.ToDictionary(x => x.Id);
+        var allIds = detail.Items.Select(x => x.Id).ToHashSet();
+        if (stories.Any(story =>
+                !story.ParentItemId.HasValue || !epicIds.Contains(story.ParentItemId.Value) ||
+                !story.SprintId.HasValue || !HasCompletePlanning(story)))
+            return new(false, "every Story must belong to an Epic and sprint and contain complete product guidance");
+        if (stories.Any(story => !tasks.Any(task => task.ParentItemId == story.Id)))
+            return new(false, "every Story must have at least one child Task");
+        if (tasks.Any(task =>
+                !task.ParentItemId.HasValue || !storyById.TryGetValue(task.ParentItemId.Value, out var parent) ||
+                !task.SprintId.HasValue || task.SprintId != parent.SprintId || !HasJuniorReadyTask(task)))
+            return new(false, "every Task must belong to its Story's sprint and contain junior-ready guidance");
+        if (stories.Concat(tasks).Any(item =>
+                item.Planning!.DependencyItemIds.Any(dependencyId => !allIds.Contains(dependencyId))))
+            return new(false, "one or more ticket dependencies do not resolve");
+        if (epics.Concat(stories).Concat(tasks).Any(item =>
+                item.ColumnId != backlog.Id || item.DueDate.HasValue || item.EstimatePoints.HasValue ||
+                item.AssignedEmployeeId.HasValue || item.AssignedInstallationId.HasValue ||
+                item.AssignedWorkerId.HasValue))
+            return new(false, "provisional tickets must remain unassigned, undated, unestimated Backlog work");
+        if (expectedPublication is not null)
+        {
+            var expectedItemIds = expectedPublication.Epics.Select(x => x.ItemId)
+                .Append(expectedPublication.EpicId)
+                .Concat(expectedPublication.Tickets.Select(x => x.ItemId))
+                .ToHashSet();
+            var expectedSprintIds = expectedPublication.Sprints.Select(x => x.SprintId).ToHashSet();
+            if (!expectedItemIds.IsSubsetOf(allIds) ||
+                !expectedSprintIds.IsSubsetOf(sprints.Select(x => x.Id).ToHashSet()))
+                return new(false, "one or more expected idempotent publication artifacts or batches are missing");
+        }
+        return new(true,
+            $"Verified {epics.Count} Epic(s), {stories.Count} Story ticket(s), {tasks.Count} junior-ready Task ticket(s), and {sprints.Count} Planned sprint(s).");
+
+        static bool HasCompletePlanning(WorkItem item) =>
+            item.Planning is { Requirements.Count: > 0, AcceptanceCriteria.Count: > 0 } &&
+            item.Planning.Constraints is { Count: > 0 } &&
+            !string.IsNullOrWhiteSpace(item.Description);
+
+        static bool HasJuniorReadyTask(WorkItem item)
+        {
+            if (!HasCompletePlanning(item))
+                return false;
+            var requiredSections = new[]
+            {
+                "## Objective", "## Context", "## Requirements", "## Acceptance criteria",
+                "## Interfaces and data", "## Ordered implementation guidance", "## Tests",
+                "## Dependencies", "## Constraints", "## Migration and rollback",
+                "## Definition of done"
+            };
+            return requiredSections.All(section =>
+                item.Description.Contains(section, StringComparison.OrdinalIgnoreCase));
+        }
+    }
+
+    private static async Task EnsureSprintReadinessCommitmentAsync(
+        Guid boardId,
+        Guid sprintId,
+        AgentRuntimeContext context,
+        CancellationToken cancellationToken)
+    {
+        var correlationId = $"{SprintReadinessCommitmentPrefix}{boardId:N}:{sprintId:N}";
+        var directory = await context.Platform.PersonalTodo.ListAsync(cancellationToken);
+        if (directory.Boards.SelectMany(x => x.Items).Any(x =>
+                string.Equals(x.CorrelationId, correlationId, StringComparison.Ordinal) &&
+                x.ArchivedAt is null))
+            return;
+        _ = await context.Platform.PersonalTodo.AddAsync(
+            new AddPersonalTodoItemRequest(
+                "Review sprint readiness",
+                "Reconcile authoritative delivery details, run preflight, and explicitly start this sprint only when it is eligible.",
+                "High",
+                null,
+                $"sprint-readiness:{boardId:N}:{sprintId:N}",
+                CorrelationId: correlationId),
+            cancellationToken);
+    }
+
+    private sealed record BacklogVerification(bool IsComplete, string Summary);
 
     public override async Task HandleEventAsync(
         AgentEventEnvelope message,
@@ -669,17 +817,10 @@ Architect: provide the dependency order, affected system boundaries, key quality
 
         try
         {
-            var readinessAcknowledgement = await TryHandleArchitectReadinessAsync(
+            var readinessHandled = await TryHandleArchitectReadinessAsync(
                 incoming, context, cancellationToken);
-            if (readinessAcknowledgement is not null)
+            if (readinessHandled)
             {
-                await PublishChunkAsync(context, message.EventId, new AssistantResponseChunk(
-                    conversationId,
-                    sequence++,
-                    readinessAcknowledgement,
-                    IsFinal: false,
-                    TurnId: incoming.TurnId,
-                    Attempt: incoming.Attempt), cancellationToken);
                 await PublishChunkAsync(context, message.EventId, new AssistantResponseChunk(
                     conversationId,
                     sequence,
@@ -691,7 +832,7 @@ Architect: provide the dependency order, affected system boundaries, key quality
                 await WriteRunLogAsync(
                     incoming.ProviderProfileId,
                     incoming.Message,
-                    readinessAcknowledgement,
+                    "Planning commitment awakened.",
                     "Completed",
                     startedAt,
                     stopwatch.ElapsedMilliseconds,
@@ -990,6 +1131,7 @@ Retry now. The ensure_software_team_board tool is required. Use its structured r
             {
                 await RouteContextUpdatePlanToCeoAsync(update, context, cancellationToken);
                 await DisseminateContextUpdateAsync(update, response, context, cancellationToken);
+                await WakePlanningCommitmentAsync(null, context, cancellationToken);
             }
             return new AgentWorkResult(true, SerializePayload(response));
         }
@@ -1048,9 +1190,11 @@ Retry now. The ensure_software_team_board tool is required. Use its structured r
             text,
             $"resource-change-decision-ack:{request.Id:N}:{request.Status}",
             cancellationToken);
+        if (request.Status.Equals("Approved", StringComparison.OrdinalIgnoreCase))
+            await WakePlanningCommitmentAsync(request.TeamId, context, cancellationToken);
     }
 
-    private async Task<string?> TryHandleArchitectReadinessAsync(
+    private async Task<bool> TryHandleArchitectReadinessAsync(
         CommunicationMessageReceivedEvent incoming,
         AgentRuntimeContext context,
         CancellationToken cancellationToken)
@@ -1064,11 +1208,11 @@ Retry now. The ensure_software_team_board tool is required. Use its structured r
             !Guid.TryParse(senderValue, out var senderId) ||
             !Guid.TryParse(incoming.ConversationId, out var conversationId) ||
             !Guid.TryParse(context.InstallationId, out var installationId))
-            return null;
+            return false;
 
         var roster = await ReadCompleteTeamRosterAsync(context, cancellationToken);
         if (roster.Team is null || !Guid.TryParse(roster.Team.TeamId, out var teamId))
-            return null;
+            return false;
         var operatingContext = await _orchestrator.AssembleContextAsync(context, cancellationToken);
         var organization = operatingContext.Organization;
         var self = organization?.People.SingleOrDefault(x =>
@@ -1080,7 +1224,7 @@ Retry now. The ensure_software_team_board tool is required. Use its structured r
             NormalizeRoleIdentity(x.TeamRole ?? x.CompanyRole ?? string.Empty) ==
             NormalizeRoleIdentity("Software Architect"));
         if (self is null || architect?.AgentInstallationId is null || architect.ReportsToId != self.Id || !rosterArchitect)
-            return null;
+            return false;
 
         var approved = await context.Platform.ReadResourceChangesAsync(
             new ResourceChangeReadRequest(Statuses: ["Approved"]), cancellationToken);
@@ -1089,29 +1233,11 @@ Retry now. The ensure_software_team_board tool is required. Use its structured r
             .OrderByDescending(x => x.DecidedAt ?? x.CreatedAt)
             .FirstOrDefault();
         if (request is null)
-            return null;
+            return false;
 
-        var board = (await EnsureSoftwareTeamBoardAsync(request, roster.Team, context, cancellationToken)).Board;
-        var acknowledgement =
-            $"Welcome aboard. I’ve confirmed your onboarding and started our {board.Name} planning session. " +
-            "I’ll own product outcomes and acceptance criteria; please own the technical decomposition, dependencies, risks, and implementation sequence.";
-        _ = await context.Platform.Communication.StartCoordinationAsync(
-            new StartAgentCoordinationRequest(
-                architect.Id,
-                $"{board.Name} planning",
-                request.ProductGoal,
-                [
-                    "Product outcomes, priorities, requirements, acceptance criteria, and non-goals are explicit.",
-                    "Architecture supplies dependency order, risks, technical slices, and implementation sequencing.",
-                    "An undated, unestimated, unassigned provisional backlog is published before delivery staffing."
-                ],
-                acknowledgement,
-                conversationId,
-                incoming.TurnId,
-                incoming.MessageId,
-                $"product-architect-planning:{teamId:N}"),
-            cancellationToken);
-        return acknowledgement;
+        _ = await EnsurePlanningCommitmentAsync(
+            teamId, wakeExisting: true, context, cancellationToken);
+        return true;
     }
 
     internal async Task HandleHiringRecommendationFulfilledAsync(
@@ -1180,6 +1306,39 @@ Retry now. The ensure_software_team_board tool is required. Use its structured r
         if (roster.Team is not null && architectCovered)
         {
             _ = await EnsureSoftwareTeamBoardAsync(request, roster.Team, context, cancellationToken);
+            await WakePlanningCommitmentAsync(
+                Guid.TryParse(roster.Team.TeamId, out var teamId) ? teamId : null,
+                context,
+                cancellationToken);
+        }
+    }
+
+    private async Task WakePlanningCommitmentAsync(
+        Guid? teamId,
+        AgentRuntimeContext context,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            if (!teamId.HasValue)
+            {
+                var roster = await ReadCompleteTeamRosterAsync(context, cancellationToken);
+                if (roster.Team is null || !Guid.TryParse(roster.Team.TeamId, out var rosterTeamId))
+                    return;
+                teamId = rosterTeamId;
+            }
+            _ = await EnsurePlanningCommitmentAsync(
+                teamId.Value, wakeExisting: true, context, cancellationToken);
+        }
+        catch (PlatformCapabilityException exception)
+            when (exception.Code is PlatformCapabilityErrorCode.NotFound or
+                  PlatformCapabilityErrorCode.Denied or
+                  PlatformCapabilityErrorCode.Unavailable)
+        {
+            _logger.LogWarning(
+                exception,
+                "Planning commitment wake for team {TeamId} is waiting on operational capability state.",
+                teamId);
         }
     }
 
@@ -1427,83 +1586,21 @@ Retry now. The ensure_software_team_board tool is required. Use its structured r
             }
             if (item.ColumnId == readyColumnId) readyTicketIds.Add(item.Id);
         }
-        var sprintStarted = readyTicketIds.Count > 0 &&
-                            await StartPublishedSprintAsync(
-                                boardId, publication, context, cancellationToken);
-        if (sprintStarted)
+        var earliestSprint = publication.Sprints.OrderBy(x => x.Ordinal).FirstOrDefault();
+        if (earliestSprint is not null)
         {
-            var startedSprintId = publication.Sprints
-                .OrderBy(x => x.Ordinal)
-                .First().SprintId;
-            await EnsureRollingRefinementCommitmentAsync(
-                boardId, startedSprintId, context, cancellationToken);
+            await EnsureSprintReadinessCommitmentAsync(
+                boardId, earliestSprint.SprintId, context, cancellationToken);
         }
         await NotifyDeliveryPlanningStatusAsync(
             $"Architecture plan `{publication.PlanId:D}` is approved and published with " +
             $"{publication.Sprints.Count} planned sprint(s) and {publication.Tickets.Count} ticket(s). " +
             $"{readyTicketIds.Count} executable ticket(s) from the earliest sprint are Ready For Development. " +
-            (sprintStarted
-                ? "The Product Manager preflighted and explicitly started that sprint; later sprints remain Planned."
-                : "The sprint remains Planned because it was not eligible for Product Manager activation."),
+            "The sprint remains Planned until the separate Product Manager readiness commitment preflights and explicitly starts it.",
             $"software-architecture:{publication.PlanId:N}:published",
             context,
             cancellationToken);
         return new GuardedArchitecturePublishResult(publication, readyTicketIds);
-    }
-
-    private static async Task EnsureRollingRefinementCommitmentAsync(
-        Guid boardId,
-        Guid startedSprintId,
-        AgentRuntimeContext context,
-        CancellationToken cancellationToken)
-    {
-        var correlationId = $"{RefinementCommitmentPrefix}{boardId:N}:{startedSprintId:N}";
-        var directory = await context.Platform.PersonalTodo.ListAsync(cancellationToken);
-        if (directory.Boards.SelectMany(x => x.Items).Any(x =>
-                string.Equals(x.CorrelationId, correlationId, StringComparison.Ordinal)))
-            return;
-        _ = await context.Platform.PersonalTodo.AddAsync(
-            new AddPersonalTodoItemRequest(
-                "Refine the rolling sprint horizon",
-                "Detail the next planned sprint so two not-yet-started sprints remain ready for PM review.",
-                "High",
-                null,
-                $"rolling-refinement:{boardId:N}:{startedSprintId:N}",
-                CorrelationId: correlationId),
-            cancellationToken);
-    }
-
-    private static async Task<bool> StartPublishedSprintAsync(
-        Guid boardId,
-        ArchitecturePublishResponse publication,
-        AgentRuntimeContext context,
-        CancellationToken cancellationToken)
-    {
-        var earliest = publication.Sprints.OrderBy(x => x.Ordinal).FirstOrDefault();
-        if (earliest is null)
-            return false;
-        var sprint = (await context.Platform.Work.ListSprintsAsync(boardId, cancellationToken))
-            .SingleOrDefault(x => x.Id == earliest.SprintId);
-        if (sprint is null || !sprint.Status.Equals("Planned", StringComparison.OrdinalIgnoreCase))
-            return false;
-        var request = new StartWorkSprintExecutionRequest(
-            boardId,
-            sprint.Id,
-            sprint.Revision,
-            $"software-architecture:{publication.PlanId:N}:sprint:{sprint.Id:N}:start");
-        var preflight = await context.Platform.InvokeAsync<
-            StartWorkSprintExecutionRequest,
-            WorkSprintPreflightResult>(
-            ProductManagerProfile.PreflightSprintCapability,
-            request,
-            cancellationToken);
-        if (!preflight.IsValid)
-            return false;
-        _ = await context.Platform.InvokeAsync<StartWorkSprintExecutionRequest, JsonElement>(
-            ProductManagerProfile.StartSprintCapability,
-            request,
-            cancellationToken);
-        return true;
     }
 
     internal static IReadOnlyList<ArchitectureAssignmentPrincipal> BuildArchitectureAssignmentPool(

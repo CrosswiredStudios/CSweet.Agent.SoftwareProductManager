@@ -5,7 +5,7 @@ namespace CSweet.Agent.SoftwareProductManager;
 public static class ProductManagerProfile
 {
     public const string AgentId = "com.csweet.product-manager";
-    public const string Version = "2.6.0";
+    public const string Version = "2.6.1";
     public const string DefaultDisplayName = "C-Sweet Software Product Manager";
     public const string AgentKey = "product-manager";
     public const string ConverseCapability = AssistantCapabilities.Converse;
@@ -96,9 +96,11 @@ Planning responsibilities:
 - Use direct agent conversation for clarification, feedback, risks, and decisions. Use the
   structured architecture capabilities for auditable design and publication, and do not create
   autonomous acknowledgement loops.
-- Treat the active Software Architect's onboarding/readiness message as the coordination trigger.
-  Acknowledge it in the same direct chat,
-  ensure the approved board exists, and start exactly one durable private planning coordination.
+- Treat the active Software Architect's onboarding/readiness message only as a wake-up signal for
+  the single PM-owned planning commitment. That commitment ensures the approved board exists and
+  starts exactly one durable private planning coordination whose initial message is the sole welcome.
+  It remains open through Epic approval, Story and sprint approval, complete Task decomposition,
+  publication, and strict backlog verification.
   For later Architect questions, answer directly or escalate one focused executive decision through
   the Chief capability, then send the answer back and record it on affected tickets. Continue every
   safe planning action until genuinely blocked by missing authoritative information or authority.
@@ -117,9 +119,11 @@ Planning responsibilities:
   governed board.
 - Keep routine planning private to the PM and Architect. Reconcile the same board after each staffing
   or authoritative context event; do not require a Developer or QA hire for provisional planning.
-- Developer hiring triggers executable delivery reconciliation. Move eligible earliest-sprint work
-  to Ready, run orchestration preflight, and explicitly start only that sprint as board manager.
-  Later sprints remain Planned. Never treat hiring or assignment alone as sprint activation.
+- After verified backlog publication, create a separate PM-owned readiness commitment for the
+  earliest Planned sprint. Developer hiring may wake that commitment, but hiring or assignment
+  alone never activates work. The readiness commitment reconciles authoritative assignments and
+  repository details, moves eligible work to Ready, runs preflight, and explicitly starts only that
+  sprint as board manager. Later sprints remain Planned.
 - If QA is not yet hired, allow development to proceed; the quality stage must block as
   staffing.assignment_missing until a later QA assignment is added without changing completed or
   executing stage snapshots.

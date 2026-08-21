@@ -117,7 +117,7 @@ public sealed class ProductManagerProfileTests
             "src",
             "CSweet.Agent.SoftwareProductManager",
             "CSweet.Agent.SoftwareProductManager.csproj"));
-        Assert.Contains("CSweet.Agent.SDK\" Version=\"3.11.0", project, StringComparison.Ordinal);
+        Assert.Contains("CSweet.Agent.SDK\" Version=\"3.11.1", project, StringComparison.Ordinal);
         Assert.Contains("<ProjectReference", project, StringComparison.Ordinal);
         Assert.Contains($"<Version>{ProductManagerProfile.Version}</Version>", project, StringComparison.Ordinal);
     }
@@ -152,7 +152,8 @@ public sealed class ProductManagerProfileTests
             StringComparison.Ordinal);
         Assert.Contains("direct agent conversation", ProductManagerProfile.SystemPrompt, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("approval boundary", ProductManagerProfile.SystemPrompt, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("coordination trigger", ProductManagerProfile.SystemPrompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("wake-up signal", ProductManagerProfile.SystemPrompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("single PM-owned planning commitment", ProductManagerProfile.SystemPrompt, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("until genuinely blocked", ProductManagerProfile.SystemPrompt, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("one consolidated response", ProductManagerProfile.SystemPrompt, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("product definition", ProductManagerProfile.SystemPrompt, StringComparison.OrdinalIgnoreCase);
@@ -822,7 +823,7 @@ What level of prototype fidelity are we aiming for?
                 ["The demo passes acceptance tests."], self, architect, false, [initial]),
             runtime.CreateContext(), CancellationToken.None);
         Assert.Equal(AgentCoordinationDispositions.Continue, first.Disposition);
-        Assert.Contains("dependency order", first.Content, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("outcome Epics", first.Content, StringComparison.OrdinalIgnoreCase);
 
         var second = await agent.HandleCoordinationTurnAsync(
             new AgentCoordinationTurnRequest(
@@ -834,13 +835,52 @@ What level of prototype fidelity are we aiming for?
                         AgentCoordinationDispositions.Continue, first.Content, now),
                     new AgentCoordinationTurn(Guid.NewGuid(), 2, architectId,
                         AgentCoordinationDispositions.Continue,
-                        "Build the API contract, persistence path, rollback, and fault tests in that order.", now)
+                        "Epic proposal: Core Product Outcome and Delivery Confidence.", now)
                 ]),
             runtime.CreateContext(), CancellationToken.None);
 
-        Assert.Equal(AgentCoordinationDispositions.Blocked, second.Disposition);
+        Assert.Equal(AgentCoordinationDispositions.Continue, second.Disposition);
+        Assert.Contains("Stories", second.Content, StringComparison.OrdinalIgnoreCase);
+
+        var third = await agent.HandleCoordinationTurnAsync(
+            new AgentCoordinationTurnRequest(
+                sessionId, 5, 5, "Demo delivery", "Complete the demo",
+                ["The demo passes acceptance tests."], self, architect, false,
+                [
+                    initial,
+                    new AgentCoordinationTurn(Guid.NewGuid(), 1, productManagerId,
+                        AgentCoordinationDispositions.Continue, first.Content, now),
+                    new AgentCoordinationTurn(Guid.NewGuid(), 2, architectId,
+                        AgentCoordinationDispositions.Continue,
+                        "Epic proposal: Core Product Outcome and Delivery Confidence.", now),
+                    new AgentCoordinationTurn(Guid.NewGuid(), 3, productManagerId,
+                        AgentCoordinationDispositions.Continue, second.Content, now),
+                    new AgentCoordinationTurn(Guid.NewGuid(), 4, architectId,
+                        AgentCoordinationDispositions.Continue,
+                        "Story and sprint proposal: deliver the browser path before hardening.", now)
+                ]),
+            runtime.CreateContext(), CancellationToken.None);
+
+        Assert.Equal(AgentCoordinationDispositions.Continue, third.Disposition);
+        Assert.Contains("Task decomposition", third.Content, StringComparison.OrdinalIgnoreCase);
+
+        var fourth = await agent.HandleCoordinationTurnAsync(
+            new AgentCoordinationTurnRequest(
+                sessionId, 7, 7, "Demo delivery", "Complete the demo",
+                ["The demo passes acceptance tests."], self, architect, false,
+                [
+                    initial,
+                    new AgentCoordinationTurn(Guid.NewGuid(), 5, productManagerId,
+                        AgentCoordinationDispositions.Continue, third.Content, now),
+                    new AgentCoordinationTurn(Guid.NewGuid(), 6, architectId,
+                        AgentCoordinationDispositions.Continue,
+                        "Task decomposition complete: API, persistence, rollback, and fault tests.", now)
+                ]),
+            runtime.CreateContext(), CancellationToken.None);
+
+        Assert.Equal(AgentCoordinationDispositions.Blocked, fourth.Disposition);
         Assert.Empty(created);
-        Assert.Contains("performance target", second.Content, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("performance target", fourth.Content, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -898,7 +938,30 @@ What level of prototype fidelity are we aiming for?
                                 "Complete a race", "Story", "Backlog", WorkPriorities.High, null, 2, 1, null)
                             { Planning = planning },
                             new WorkItem(taskId, columnId, storyId, sprintId, WorkItemKinds.Task,
-                                "Implement race loop", "Task", "Backlog", WorkPriorities.High, null, 3, 1, null)
+                                "Implement race loop", """
+## Objective
+Implement the race loop.
+## Context
+Child of the playable demo Story.
+## Requirements
+- Deliver deterministic race state.
+## Acceptance criteria
+- The demo passes.
+## Interfaces and data
+- Keep the browser boundary explicit.
+## Ordered implementation guidance
+- Implement state, then rendering.
+## Tests
+- Cover success and failure paths.
+## Dependencies
+- None.
+## Constraints
+- Remain browser portable.
+## Migration and rollback
+Revert the isolated state module.
+## Definition of done
+- Acceptance evidence is attached.
+""", "Backlog", WorkPriorities.High, null, 3, 1, null)
                             { Planning = planning }
                         ]
                         : [])))
@@ -921,6 +984,17 @@ What level of prototype fidelity are we aiming for?
                     "Demo Delivery", "Complete the demo", ["The demo passes acceptance tests."],
                     AgentCoordinationStatuses.Active, 2, 2, productManagerId, false, null,
                     DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, [])))
+            .RegisterCapability<object, PersonalTodoDirectory>(
+                PersonalTodoCapabilities.Read,
+                (_, _) => Task.FromResult(new PersonalTodoDirectory([], productManagerId)))
+            .RegisterCapability<AddPersonalTodoItemRequest, PersonalTodoItem>(
+                PersonalTodoCapabilities.Add,
+                (request, _) => Task.FromResult(new PersonalTodoItem(
+                    Guid.NewGuid(), Guid.NewGuid(), productManagerId, productManagerId, "Product Manager",
+                    request.Title, request.Description ?? string.Empty, PersonalTodoStatuses.Ready,
+                    request.Priority, 2048, 1, request.DueDate, request.SourceConversationId,
+                    request.SourceMessageId, [], null, null, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow)
+                { CorrelationId = request.CorrelationId }))
             .RegisterCapability<ArchitectureDesignRequest, JsonElement>(
                 ProductManagerProfile.SoftwareArchitectureDesignCapability,
                 (request, _) =>
@@ -969,7 +1043,7 @@ What level of prototype fidelity are we aiming for?
                         "Welcome aboard. Build the complete outcome backlog.", now),
                     new AgentCoordinationTurn(Guid.NewGuid(), 1, architectId,
                         AgentCoordinationDispositions.Continue,
-                        "Use a browser boundary, deterministic race state, and dependency-ordered slices.", now)
+                        "Task decomposition complete: browser boundary, deterministic race state, and dependency-ordered slices.", now)
                 ]),
             runtime.CreateContext(), CancellationToken.None);
 

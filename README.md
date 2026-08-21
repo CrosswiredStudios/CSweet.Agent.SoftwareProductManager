@@ -1,7 +1,7 @@
 # C-Sweet Software Product Manager
 
-First-party Software Product Manager agent for C-Sweet, built on `CSweet.Agent.SDK` 3.11.0 and manifest protocol v2.
-The agent package version is `2.6.0`.
+First-party Software Product Manager agent for C-Sweet, built on `CSweet.Agent.SDK` 3.11.1 and manifest protocol v2.
+The agent package version is `2.6.1`.
 
 It owns product outcomes, customer discovery, product strategy, prioritization, roadmaps, requirements, success measures, delivery alignment, and product-team design. It does not choose technical architecture, write production code, make legal conclusions, source candidates, hire workers, or spend money.
 
@@ -47,15 +47,17 @@ selection gates publication and assignment, not drafting. The Architect owns tec
 the Product Manager retains product scope and priority.
 
 Architecture planning uses `software-architecture.design.v2` and
-`software-architecture.publish-plan.v2`. The provider returns outcome Epics, Stories grouped into
-planned sprints, and child Tasks for the rolling two-sprint horizon. Publication leaves all work
-in Backlog. The PM reads the resulting sprint state and is the only actor that may preflight and
-explicitly start an eligible sprint.
+`software-architecture.publish-plan.v2`. One PM-owned personal commitment supervises the approved
+goal through staged Epic approval, Story and sprint approval, complete Task decomposition,
+publication, and strict board verification. The provider returns outcome Epics, Stories grouped
+into planned sprints, and junior-ready child Tasks for every Story. Publication leaves all work in
+Backlog and every sprint Planned. Only a separate PM-owned sprint-readiness commitment may later
+preflight and explicitly start one eligible sprint.
 
-An explicit direct message from the active Software Architect is an actionable planning trigger.
-The Product Manager reconciles the board, reads its actual manager conversation for authoritative
-repository and product decisions, and advances architecture publication and sprint readiness until
-a real governance decision is missing.
+An explicit direct message from the active Software Architect only wakes the durable planning
+commitment. The commitment reconciles the board, transcript, roster, bindings, and authoritative
+product decisions and advances the next missing planning stage until the complete backlog verifies
+or a real governance decision is missing.
 
 The manifest requests a five-minute **Think every** cadence. Platform-issued attention reviews
 reconcile durable PM–Architect commitments without calling the model when no work is actionable.
@@ -74,7 +76,7 @@ dotnet build CSweet.Agent.SoftwareProductManager.slnx
 dotnet test CSweet.Agent.SoftwareProductManager.slnx
 ```
 
-Requirements are .NET 10, `CSweet.Agent.SDK` 3.11.0, `CSweet.Memory`, an approved protocol-v2 installation, an active managing employee, and the grants in [GRANTS.md](GRANTS.md).
+Requirements are .NET 10, `CSweet.Agent.SDK` 3.11.1, `CSweet.Memory`, an approved protocol-v2 installation, an active managing employee, and the grants in [GRANTS.md](GRANTS.md).
 
 ## SDK 1.1.1 authoring contract
 

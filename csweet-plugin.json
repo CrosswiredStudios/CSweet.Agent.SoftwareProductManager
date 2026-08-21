@@ -3,7 +3,7 @@
   "kind": "agent",
   "id": "com.csweet.product-manager",
   "name": "C-Sweet Software Product Manager",
-  "version": "2.6.0",
+  "version": "2.6.1",
   "publisher": {
     "id": "com.csweet",
     "name": "C-Sweet"
@@ -566,7 +566,7 @@
     { "name": "management.product-role-brief.v1", "scope": "organization", "purpose": "Request an authoritative role brief from the active Chief of Staff sharing the CEO manager" },
     { "name": "management.product-plan.review.v1", "scope": "organization", "purpose": "Submit the initial product and product-team recommendation to the CEO-peer Chief of Staff for reconciliation" },
     { "name": "management.product-escalation.v1", "scope": "organization", "purpose": "Route executive information gaps and decisions through the CEO-peer Chief of Staff liaison" },
-    { "name": "software-architecture.design.v2", "scope": "team", "purpose": "Request a typed outcome-Epic and rolling two-sprint plan from the bound Software Architect" },
+    { "name": "software-architecture.design.v2", "scope": "team", "purpose": "Request typed outcome Epics, planned Stories, and complete Task decomposition from the bound Software Architect" },
     { "name": "software-architecture.publish-plan.v2", "scope": "team", "purpose": "Publish the Product Manager-approved hierarchical provisional or executable architecture plan" }
   ],
   "events": {
