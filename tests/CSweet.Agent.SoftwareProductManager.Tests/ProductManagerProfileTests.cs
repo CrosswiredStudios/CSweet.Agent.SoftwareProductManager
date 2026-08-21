@@ -48,6 +48,7 @@ public sealed class ProductManagerProfileTests
         Assert.Contains(ProductManagementCapabilities.PlanReview, requires);
         Assert.Contains(ProductManagementCapabilities.Escalation, requires);
         Assert.Contains(WorkBoardCapabilities.Create, requires);
+        Assert.Contains(WorkSprintCapabilities.Read, requires);
         Assert.Contains(ProductManagerProfile.TeamRosterCapability, requires);
         Assert.Contains(ProductManagerProfile.SoftwareArchitectureDesignCapability, requires);
         Assert.Contains(ProductManagerProfile.SoftwareArchitecturePublishCapability, requires);
@@ -471,10 +472,8 @@ What level of prototype fidelity are we aiming for?
         Assert.Equal(readinessMessageId, start.SourceMessageId);
         Assert.Equal(readinessTurnId, start.SourceChatTurnId);
         Assert.Equal($"product-architect-planning:{teamId:N}", start.IdempotencyKey);
-        var acknowledgement = Assert.Single(sentMessages, x =>
-            x.IdempotencyKey == $"planning-readiness-ack:{teamId:N}");
-        Assert.Equal(chatId, acknowledgement.ChatId);
-        Assert.Contains("Welcome aboard", acknowledgement.Content, StringComparison.Ordinal);
+        Assert.Empty(sentMessages);
+        Assert.Contains("Welcome aboard", start.InitialMessage, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -493,8 +492,8 @@ What level of prototype fidelity are we aiming for?
         var tools = await runtime.CreateContext().GetModelToolsAsync();
         var names = tools.OfType<AIFunctionDeclaration>().Select(x => x.Name).ToArray();
 
-        Assert.Contains("software_architecture_design_v1", names);
-        Assert.Contains("software_architecture_publish_plan_v1", names);
+        Assert.Contains("software_architecture_design_v2", names);
+        Assert.Contains("software_architecture_publish_plan_v2", names);
     }
 
     [Fact]
@@ -756,6 +755,7 @@ What level of prototype fidelity are we aiming for?
         var architectId = Guid.NewGuid();
         var architectInstallationId = Guid.NewGuid();
         var boardId = Guid.NewGuid();
+        var sessionId = Guid.NewGuid();
         var columnId = Guid.NewGuid();
         var created = new List<CreateWorkItemRequest>();
         var runtime = new AgentTestRuntime()
@@ -774,6 +774,23 @@ What level of prototype fidelity are we aiming for?
                     new WorkBoardSummary(boardId, "Demo delivery", "Approved board", false, false, 1, []),
                     [new WorkBoardColumn(columnId, "Ready For Development", "ToDo", 1, "Pull", null)],
                     [])))
+            .RegisterCapability<ReadAgentCoordinationRequest, AgentCoordinationSession>(
+                CommunicationCapabilities.CoordinationRead,
+                (_, _) => Task.FromResult(new AgentCoordinationSession(
+                    sessionId, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(),
+                    new AgentCoordinationParticipant(productManagerId, productInstallationId,
+                        "Product Manager", "Product Manager"),
+                    new AgentCoordinationParticipant(architectId, architectInstallationId,
+                        "Architect", "Software Architect"),
+                    "Demo delivery", "Complete the demo", ["The demo passes acceptance tests."],
+                    AgentCoordinationStatuses.Active, 3, 3, productManagerId, false, null,
+                    DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, [])))
+            .RegisterCapability<ArchitectureDesignRequest, JsonElement>(
+                ProductManagerProfile.SoftwareArchitectureDesignCapability,
+                (_, _) => Task.FromResult(JsonSerializer.SerializeToElement(new
+                {
+                    plan = new { blockingQuestions = new[] { "Which browser performance target is authoritative?" } }
+                })))
             .RegisterCapability<CreateWorkItemRequest, WorkItem>(
                 WorkItemCapabilities.Create,
                 (request, _) =>
@@ -807,7 +824,6 @@ What level of prototype fidelity are we aiming for?
         Assert.Equal(AgentCoordinationDispositions.Continue, first.Disposition);
         Assert.Contains("dependency order", first.Content, StringComparison.OrdinalIgnoreCase);
 
-        var sessionId = Guid.NewGuid();
         var second = await agent.HandleCoordinationTurnAsync(
             new AgentCoordinationTurnRequest(
                 sessionId, 3, 3, "Demo delivery", "Complete the demo",
@@ -824,7 +840,147 @@ What level of prototype fidelity are we aiming for?
 
         Assert.Equal(AgentCoordinationDispositions.Blocked, second.Disposition);
         Assert.Empty(created);
-        Assert.Contains("planning", second.Content, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("performance target", second.Content, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Coordination_UsesV2ProviderAndCompletesAfterHierarchicalPublication()
+    {
+        var productManagerId = Guid.NewGuid();
+        var productInstallationId = Guid.NewGuid();
+        var architectId = Guid.NewGuid();
+        var architectInstallationId = Guid.NewGuid();
+        var boardId = Guid.NewGuid();
+        var teamId = Guid.NewGuid();
+        var sessionId = Guid.NewGuid();
+        var columnId = Guid.NewGuid();
+        var sprintId = Guid.NewGuid();
+        var epicId = Guid.NewGuid();
+        var storyId = Guid.NewGuid();
+        var taskId = Guid.NewGuid();
+        var published = false;
+        var designCalls = new List<ArchitectureDesignRequest>();
+        var publishCalls = new List<GuardedArchitecturePublishRequest>();
+        var boardSummary = new WorkBoardSummary(
+            boardId, "Demo Delivery", "Approved board", false, false, 1, [])
+        {
+            TeamId = teamId,
+            ManagerOrganizationUserId = productManagerId
+        };
+        var planning = new WorkItemPlanningSpecification(
+            ["Deliver the demo."], ["The demo passes."], ["Verify the browser path."]);
+        var runtime = new AgentTestRuntime()
+            .RegisterCapability<TeamRosterRequest, TeamRosterResponse>(
+                ProductManagerProfile.TeamRosterCapability,
+                (_, _) => Task.FromResult(new TeamRosterResponse(new AgentTeamContext(
+                    teamId.ToString("D"), "demo", "Demo Delivery", 1,
+                    productManagerId.ToString("D"), "Product Manager",
+                    [
+                        new AgentTeammate(productManagerId.ToString("D"), "Product Manager", "Agent",
+                            null, "Product Manager", "Self", "Active"),
+                        new AgentTeammate(architectId.ToString("D"), "Architect", "Agent",
+                            null, "Software Architect", "DirectReport", "Active")
+                    ], [], 2, false))))
+            .RegisterCapability<WorkBoardListRequest, IReadOnlyList<WorkBoardSummary>>(
+                WorkBoardCapabilities.Read,
+                (_, _) => Task.FromResult<IReadOnlyList<WorkBoardSummary>>([boardSummary]))
+            .RegisterCapability<WorkBoardReference, WorkBoardDetail>(
+                WorkItemCapabilities.Read,
+                (_, _) => Task.FromResult(new WorkBoardDetail(
+                    boardSummary,
+                    [new WorkBoardColumn(columnId, "Backlog", "Backlog", 1, "Pull", null)],
+                    published
+                        ?
+                        [
+                            new WorkItem(epicId, columnId, null, null, WorkItemKinds.Epic,
+                                "Playable Demo", "Outcome", "Backlog", WorkPriorities.High, null, 1, 1, null),
+                            new WorkItem(storyId, columnId, epicId, sprintId, WorkItemKinds.Story,
+                                "Complete a race", "Story", "Backlog", WorkPriorities.High, null, 2, 1, null)
+                            { Planning = planning },
+                            new WorkItem(taskId, columnId, storyId, sprintId, WorkItemKinds.Task,
+                                "Implement race loop", "Task", "Backlog", WorkPriorities.High, null, 3, 1, null)
+                            { Planning = planning }
+                        ]
+                        : [])))
+            .RegisterCapability<WorkBoardReference, IReadOnlyList<WorkSprint>>(
+                WorkSprintCapabilities.Read,
+                (_, _) => Task.FromResult<IReadOnlyList<WorkSprint>>(
+                [
+                    new WorkSprint(sprintId, boardId, "Sprint 1", "Playable loop", "Planned",
+                        null, null, null, null, null, published ? 2 : 0, 0, 0, 0, 1)
+                    { Sequence = 1 }
+                ]))
+            .RegisterCapability<ReadAgentCoordinationRequest, AgentCoordinationSession>(
+                CommunicationCapabilities.CoordinationRead,
+                (_, _) => Task.FromResult(new AgentCoordinationSession(
+                    sessionId, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(),
+                    new AgentCoordinationParticipant(productManagerId, productInstallationId,
+                        "Product Manager", "Product Manager"),
+                    new AgentCoordinationParticipant(architectId, architectInstallationId,
+                        "Architect", "Software Architect"),
+                    "Demo Delivery", "Complete the demo", ["The demo passes acceptance tests."],
+                    AgentCoordinationStatuses.Active, 2, 2, productManagerId, false, null,
+                    DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, [])))
+            .RegisterCapability<ArchitectureDesignRequest, JsonElement>(
+                ProductManagerProfile.SoftwareArchitectureDesignCapability,
+                (request, _) =>
+                {
+                    designCalls.Add(request);
+                    return Task.FromResult(JsonSerializer.SerializeToElement(new
+                    {
+                        planId = Guid.NewGuid(),
+                        plan = new { blockingQuestions = Array.Empty<string>() }
+                    }));
+                })
+            .RegisterCapability<GuardedArchitecturePublishRequest, ArchitecturePublishResponse>(
+                ProductManagerProfile.SoftwareArchitecturePublishCapability,
+                (request, _) =>
+                {
+                    publishCalls.Add(request);
+                    published = true;
+                    return Task.FromResult(new ArchitecturePublishResponse(
+                        Guid.NewGuid(), epicId,
+                        [new PublishedArchitectureSprint(1, sprintId, "Sprint 1")],
+                        [
+                            new PublishedArchitectureTicket("STORY-1", storyId, sprintId, WorkItemKinds.Story),
+                            new PublishedArchitectureTicket("TASK-1", taskId, sprintId, WorkItemKinds.Task)
+                        ],
+                        DateTimeOffset.UtcNow)
+                    {
+                        Epics = [new PublishedArchitectureEpic("EPIC-1", epicId, "Playable Demo")]
+                    });
+                });
+        var agent = new ProductManagerAgent(
+            NullLogger<ProductManagerAgent>.Instance,
+            new ProductManagerOrchestrator(NullLogger<ProductManagerOrchestrator>.Instance));
+        var self = new AgentCoordinationParticipant(
+            productManagerId, productInstallationId, "Product Manager", "Product Manager");
+        var architect = new AgentCoordinationParticipant(
+            architectId, architectInstallationId, "Architect", "Software Architect");
+        var now = DateTimeOffset.UtcNow;
+
+        var result = await agent.HandleCoordinationTurnAsync(
+            new AgentCoordinationTurnRequest(
+                sessionId, 2, 2, "Demo Delivery", "Complete the demo",
+                ["The demo passes acceptance tests."], self, architect, false,
+                [
+                    new AgentCoordinationTurn(Guid.NewGuid(), 0, productManagerId,
+                        AgentCoordinationDispositions.Continue,
+                        "Welcome aboard. Build the complete outcome backlog.", now),
+                    new AgentCoordinationTurn(Guid.NewGuid(), 1, architectId,
+                        AgentCoordinationDispositions.Continue,
+                        "Use a browser boundary, deterministic race state, and dependency-ordered slices.", now)
+                ]),
+            runtime.CreateContext(), CancellationToken.None);
+
+        Assert.Equal(AgentCoordinationDispositions.Completed, result.Disposition);
+        Assert.Single(designCalls);
+        Assert.Single(publishCalls);
+        Assert.False(designCalls[0].RollingRefinement);
+        Assert.Contains("1 outcome Epic", result.Content, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("1 Story", result.Content, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("1 Task", result.Content, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("explicit Product Manager", result.Content, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

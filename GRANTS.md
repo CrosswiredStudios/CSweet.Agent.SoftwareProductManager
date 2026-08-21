@@ -2,7 +2,7 @@
 
 This document is the human-readable grant catalog for the C-Sweet Software Product Manager agent. The source
 of truth for installation authorization remains [`csweet-plugin.json`](csweet-plugin.json). This
-catalog was last verified against package version `2.5.5` and manifest protocol `2.0`.
+catalog was last verified against package version `2.6.0` and manifest protocol `2.0`.
 
 Serialized capability names are sourced from the authoritative `CapabilityCatalog` in
 `CSweet.Agent.SDK` 3.11.0; manifest-audit tests reject names missing from that catalog.
@@ -76,6 +76,7 @@ policy at runtime.
 | `work.item.create` | team | Create idempotent decision-ready planning tickets on the approved board. |
 | `work.item.comment` | team | Disseminate authoritative decisions to affected planning tickets. |
 | `work.item.move` | team | Move first-sprint Stories and Tasks to Ready For Development. |
+| `work.sprint.read` | team | Verify planned sprint groupings and recover durable planning after installation updates. |
 | `work.orchestration.software-template.configure` | team | Publish the bounded software delivery workflow. |
 | `work.orchestration.preflight` | team | Validate the selected sprint before activation. |
 | `work.orchestration.start` | team | Explicitly activate one eligible sprint as board manager. |
@@ -101,8 +102,8 @@ CEO manager. Calls target that Chief's exact installation and validate the CEO-p
 
 | Grant | Scope | Provider | Feature |
 |---|---|---|---|
-| `software-architecture.design.v1` | organization | Software Architect | Produce a typed, read-only system design and incremental delivery plan from approved product requirements. |
-| `software-architecture.publish-plan.v1` | organization | Software Architect | Publish the explicitly approved architecture plan as planned sprints and developer-ready tickets. |
+| `software-architecture.design.v2` | team | Software Architect | Produce a typed outcome-Epic hierarchy and rolling two-sprint delivery plan from approved requirements. |
+| `software-architecture.publish-plan.v2` | team | Software Architect | Publish the explicitly approved hierarchy as planned sprints and Backlog tickets. |
 
 The Software Product Manager retains product scope, priority, acceptance criteria, and the explicit publish
 decision. Direct agent conversation carries clarification and feedback; only the separate publish

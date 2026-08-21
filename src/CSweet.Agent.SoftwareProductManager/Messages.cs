@@ -51,6 +51,22 @@ public sealed record ArchitecturePublicationApproval(
     Guid? SourceConversationId = null,
     Guid? SourceMessageId = null);
 
+public sealed record ArchitectureDesignRequest(
+    Guid BoardId,
+    string ProductGoal,
+    IReadOnlyList<string> Requirements,
+    IReadOnlyList<string> AcceptanceCriteria,
+    string IdempotencyKey,
+    IReadOnlyList<string>? Constraints = null,
+    IReadOnlyList<string>? NonGoals = null,
+    IReadOnlyList<string>? QualityAttributes = null,
+    DateTimeOffset? DesiredStartAt = null,
+    int? SprintLengthDays = null,
+    Guid? SourceConversationId = null)
+{
+    public bool RollingRefinement { get; init; }
+}
+
 public sealed record GuardedArchitecturePublishRequest(
     Guid BoardId,
     JsonElement Design,
@@ -82,8 +98,10 @@ public sealed record ArchitecturePublishResponse(
     DateTimeOffset PublishedAt)
 {
     public bool DeliveryFinalized { get; init; }
+    public IReadOnlyList<PublishedArchitectureEpic> Epics { get; init; } = [];
 }
 
+public sealed record PublishedArchitectureEpic(string Key, Guid ItemId, string Title);
 public sealed record PublishedArchitectureSprint(int Ordinal, Guid SprintId, string Name);
 public sealed record PublishedArchitectureTicket(string Key, Guid ItemId, Guid SprintId, string Kind);
 
