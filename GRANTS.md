@@ -2,7 +2,7 @@
 
 This document is the human-readable grant catalog for the C-Sweet Software Product Manager agent. The source
 of truth for installation authorization remains [`csweet-plugin.json`](csweet-plugin.json). This
-catalog was last verified against package version `2.6.1` and manifest protocol `2.0`.
+catalog was last verified against package version `2.6.2` and manifest protocol `2.0`.
 
 Serialized capability names are sourced from the authoritative `CapabilityCatalog` in
 `CSweet.Agent.SDK` 3.11.1; manifest-audit tests reject names missing from that catalog.
@@ -67,6 +67,7 @@ policy at runtime.
 | `agent.onboarding.complete.v1` | organization | Acknowledge this installation's durable onboarding event after its initial manager message is complete. |
 | `platform.management.resource-change.propose.v1` | organization | Submit one auditable, atomic desired-team snapshot to the current manager. |
 | `platform.management.resource-change.read.v1` | organization | Read the Software Product Manager's pending and decided team snapshots. |
+| `work.personal-todo.requeue.v1` | organization | Immediately wake blocked or waiting planning commitments when authoritative state makes them actionable. |
 | `work.personal-todo.defer.v1` | organization | Persist a waiting reason and next review time for durable planning commitments. |
 | `work.board.create` | team | Create one idempotent software-team kanban board after the complete role set is approved. |
 | `work.board.configure` | team | Set or correct the PM-owned concise product board name. |

@@ -181,7 +181,9 @@ or denied. Otherwise perform the task and return a concise completion summary.
             x.ArchivedAt is null);
         if (existing is not null)
         {
-            if (wakeExisting && existing.Status is PersonalTodoStatuses.Backlog or PersonalTodoStatuses.Blocked)
+            var isWaiting = existing.Status == PersonalTodoStatuses.Running && existing.Wait is not null;
+            if (wakeExisting &&
+                (existing.Status is PersonalTodoStatuses.Backlog or PersonalTodoStatuses.Blocked || isWaiting))
             {
                 try
                 {

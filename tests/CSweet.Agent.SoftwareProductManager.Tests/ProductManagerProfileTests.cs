@@ -293,7 +293,7 @@ What level of prototype fidelity are we aiming for?
     }
 
     [Fact]
-    public async Task AttentionReview_RecoversPersistedArchitectReadinessExactlyOnce()
+    public async Task ArchitectReadinessAndAttention_ImmediatelyWakePersistedWaitingCommitmentExactlyOnce()
     {
         var organizationId = Guid.NewGuid();
         var teamId = Guid.NewGuid();
@@ -368,7 +368,20 @@ What level of prototype fidelity are we aiming for?
             "I’m onboarded and ready to begin working with you on the product plan and kanban backlog.",
             DateTimeOffset.UtcNow.AddMinutes(-5), readinessTurnId);
         AddPersonalTodoItemRequest? addedCommitment = null;
-        PersonalTodoItem? commitment = null;
+        var commitment = new PersonalTodoItem(
+            Guid.NewGuid(), personalBoardId, productManagerId, productManagerId, "Product Manager",
+            "Complete PM–Architect planning",
+            "Reconcile the approved product plan with the Software Architect and publish the provisional backlog.",
+            PersonalTodoStatuses.Running, "High", 1024, 1, null, null, null, [], null, null,
+            DateTimeOffset.UtcNow.AddMinutes(-10), DateTimeOffset.UtcNow.AddMinutes(-5))
+        {
+            CorrelationId = $"product-architect-planning:{teamId:N}",
+            Wait = new PersonalTodoWaitState(
+                DateTimeOffset.UtcNow.AddMinutes(25),
+                "Waiting for the Software Architect's onboarding readiness response.",
+                architectId)
+        };
+        var requeueCount = 0;
         AgentCoordinationSession? session = null;
         var coordinationStarts = new List<StartAgentCoordinationRequest>();
         var sentMessages = new List<CommunicationSendCapture>();
@@ -397,24 +410,30 @@ What level of prototype fidelity are we aiming for?
                     [], [], true, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow)))
             .RegisterCapability<object, PersonalTodoDirectory>(
                 PersonalTodoCapabilities.Read,
-                (_, _) => Task.FromResult(commitment is null
-                    ? new PersonalTodoDirectory([], productManagerId)
-                    : new PersonalTodoDirectory([
-                        new PersonalTodoBoard(personalBoardId, productManagerId, "Product Manager", managerId,
-                            "Manager", 1, [commitment])
-                    ], productManagerId)))
+                (_, _) => Task.FromResult(new PersonalTodoDirectory([
+                    new PersonalTodoBoard(personalBoardId, productManagerId, "Product Manager", managerId,
+                        "Manager", 1, [commitment])
+                ], productManagerId)))
             .RegisterCapability<AddPersonalTodoItemRequest, PersonalTodoItem>(
                 PersonalTodoCapabilities.Add,
                 (request, _) =>
                 {
                     addedCommitment = request;
-                    commitment ??= new PersonalTodoItem(
-                        Guid.NewGuid(), personalBoardId, productManagerId, productManagerId, "Product Manager",
-                        request.Title, request.Description ?? string.Empty, PersonalTodoStatuses.Running,
-                        request.Priority, 1024, 1, request.DueDate, request.SourceConversationId,
-                        request.SourceMessageId, [], null, null, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow)
+                    return Task.FromResult(commitment);
+                })
+            .RegisterCapability<RequeuePersonalTodoItemRequest, PersonalTodoItem>(
+                PersonalTodoCapabilities.Requeue,
+                (request, _) =>
+                {
+                    Assert.Equal(commitment.Id, request.ItemId);
+                    Assert.Equal(commitment.Revision, request.ExpectedRevision);
+                    requeueCount++;
+                    commitment = commitment with
                     {
-                        CorrelationId = request.CorrelationId
+                        Status = PersonalTodoStatuses.Ready,
+                        Revision = commitment.Revision + 1,
+                        UpdatedAt = DateTimeOffset.UtcNow,
+                        Wait = null
                     };
                     return Task.FromResult(commitment);
                 })
@@ -460,12 +479,35 @@ What level of prototype fidelity are we aiming for?
         var review = new AgentAttentionReviewContext(
             Guid.NewGuid(), now, now.AddMinutes(5), AgentAttentionReasons.Recovered);
 
-        await agent.HandleAttentionReviewAsync(review, context, CancellationToken.None);
+        await agent.HandleEventAsync(
+            new AgentEventEnvelope(
+                Guid.NewGuid(),
+                Guid.NewGuid(),
+                ProductManagerProfile.UserMessageReceivedEvent,
+                JsonSerializer.SerializeToElement(new CommunicationMessageReceivedEvent(
+                    Guid.NewGuid(),
+                    chatId.ToString("D"),
+                    architectId.ToString("D"),
+                    readiness.Content,
+                    new Dictionary<string, string>
+                    {
+                        [CommunicationMessageContextKeys.SenderEmployeeType] = "Agent",
+                        [CommunicationMessageContextKeys.SenderOrganizationUserId] = architectId.ToString("D"),
+                        [CommunicationMessageContextKeys.SenderRole] = "Software Architect",
+                        [CommunicationMessageContextKeys.SenderDisplayName] = "Software Architect"
+                    },
+                    readinessMessageId,
+                    1,
+                    readinessTurnId)),
+                now),
+            context,
+            CancellationToken.None);
         await agent.HandleAttentionReviewAsync(review, context, CancellationToken.None);
         var firstResult = await agent.HandlePersonalTodoAsync(commitment!, context, CancellationToken.None);
         var replayResult = await agent.HandlePersonalTodoAsync(commitment!, context, CancellationToken.None);
 
-        Assert.NotNull(addedCommitment);
+        Assert.Null(addedCommitment);
+        Assert.Equal(1, requeueCount);
         Assert.Equal($"product-architect-planning:{teamId:N}", commitment!.CorrelationId);
         Assert.NotNull(firstResult);
         Assert.NotNull(replayResult);

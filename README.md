@@ -1,7 +1,7 @@
 # C-Sweet Software Product Manager
 
 First-party Software Product Manager agent for C-Sweet, built on `CSweet.Agent.SDK` 3.11.1 and manifest protocol v2.
-The agent package version is `2.6.1`.
+The agent package version is `2.6.2`.
 
 It owns product outcomes, customer discovery, product strategy, prioritization, roadmaps, requirements, success measures, delivery alignment, and product-team design. It does not choose technical architecture, write production code, make legal conclusions, source candidates, hire workers, or spend money.
 
@@ -63,6 +63,8 @@ The manifest requests a five-minute **Think every** cadence. Platform-issued att
 reconcile durable PM–Architect commitments without calling the model when no work is actionable.
 Waiting commitments stay silent for 30 minutes and escalate through the reporting chain after two
 hours; runtime failures resume through public coordination recovery capabilities.
+Architect readiness immediately requeues an existing waiting planning commitment, while attention
+reviews provide the same recovery path after missed or replayed communication events.
 
 When an executive finalizes a product-team recommendation outside the Software Product Manager's reporting
 conversation, the runtime resolves the CEO manager and routes the atomic resource-change request

@@ -3,7 +3,7 @@
   "kind": "agent",
   "id": "com.csweet.product-manager",
   "name": "C-Sweet Software Product Manager",
-  "version": "2.6.1",
+  "version": "2.6.2",
   "publisher": {
     "id": "com.csweet",
     "name": "C-Sweet"
@@ -514,7 +514,7 @@
     { "name": "work.personal-todo.read.v1", "scope": "organization", "purpose": "Read resource-scoped personal queues" },
     { "name": "work.personal-todo.add.v1", "scope": "organization", "purpose": "Add self or direct-report personal work" },
     { "name": "work.personal-todo.reorder.v1", "scope": "organization", "purpose": "Reorder directly managed personal work" },
-    { "name": "work.personal-todo.requeue.v1", "scope": "organization", "purpose": "Requeue blocked personal work" },
+    { "name": "work.personal-todo.requeue.v1", "scope": "organization", "purpose": "Requeue blocked or waiting personal work when authoritative state makes it actionable" },
     { "name": "work.personal-todo.claim.v1", "scope": "organization", "purpose": "SDK-managed atomic personal work claims" },
     { "name": "work.personal-todo.complete.v1", "scope": "organization", "purpose": "SDK-managed personal work completion" },
     { "name": "work.personal-todo.block.v1", "scope": "organization", "purpose": "SDK-managed durable personal work blocking" },
