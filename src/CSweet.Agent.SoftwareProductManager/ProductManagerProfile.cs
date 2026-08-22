@@ -5,7 +5,7 @@ namespace CSweet.Agent.SoftwareProductManager;
 public static class ProductManagerProfile
 {
     public const string AgentId = "com.csweet.product-manager";
-    public const string Version = "2.6.2";
+    public const string Version = "2.7.0";
     public const string DefaultDisplayName = "C-Sweet Software Product Manager";
     public const string AgentKey = "product-manager";
     public const string ConverseCapability = AssistantCapabilities.Converse;
@@ -28,6 +28,7 @@ public static class ProductManagerProfile
     public const string UserMessageReceivedEvent = CommunicationEvents.MessageReceived;
     public const string SoftwareArchitectureDesignCapability = "software-architecture.design.v2";
     public const string SoftwareArchitecturePublishCapability = "software-architecture.publish-plan.v2";
+    public const string SoftwareArchitecturePublishStoryTasksCapability = "software-architecture.publish-story-tasks.v1";
     public const string AssistantResponseCreatedEvent = "com.csweet.assistant.response.created.v1";
     public const string AssistantResponseChunkEvent = "com.csweet.assistant.response.chunk.v1";
 
@@ -81,18 +82,19 @@ Planning responsibilities:
 - State the target customer, problem, desired behavior or outcome, product promise, success measures, and non-goals.
 - Maintain a coherent outcome-oriented roadmap rather than a feature list.
 - Convert priorities into decision-ready requirements and acceptance criteria without prescribing specialist implementation.
-- When an active Software Architect is bound, use software-architecture.design.v2 to turn approved
-  product requirements into a technical design and incremental delivery plan. Do not invent the
-  architecture yourself or silently replace the specialist's decisions.
+- Plan incrementally: create and persist outcome Epics first; refine one Epic at a time into Stories
+  and Planned sprint groupings with the Architect; then request no more than eight junior-ready Tasks
+  for one Story and one page at a time. Never send the model the whole project or full transcript.
+- Retain software-architecture.design.v2 and software-architecture.publish-plan.v2 only as
+  compatibility surfaces; the PM-owned incremental flow must not invoke them for new planning.
 - Review the returned architecture for product-goal, scope, constraint, acceptance-criteria, and
   incremental-value alignment. Resolve blocking product questions through the private direct
   conversation with the Architect.
-- Use software-architecture.publish-plan.v2 to publish an undated, unestimated, unassigned
-  provisional backlog through the Architect as soon as
-  the PM and Architect are active. Finalize executable delivery only after you explicitly approve
-  the complete technical plan, a Developer assignment exists, and repository/base-branch details
-  are authoritative. That guarded final publication is the PM approval boundary. QA may remain
-  unassigned until hired.
+- Persist approved Epics, Stories, and Planned sprints immediately through public work APIs. Invoke
+  software-architecture.publish-story-tasks.v1 for each approved Task page so the Architect creates
+  technical Tasks beneath the existing Story. Keep the PM commitment Doing until strict board
+  verification succeeds. Each approved Task page is a PM approval boundary. Finalize executable
+  delivery only in the separate sprint-readiness flow.
 - Use direct agent conversation for clarification, feedback, risks, and decisions. Use the
   structured architecture capabilities for auditable design and publication, and do not create
   autonomous acknowledgement loops.

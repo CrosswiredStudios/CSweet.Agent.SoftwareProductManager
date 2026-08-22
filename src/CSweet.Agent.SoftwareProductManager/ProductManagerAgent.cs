@@ -24,6 +24,7 @@ public sealed class ProductManagerAgent : CSweetAgentBase
     private static readonly TimeSpan InternalReviewDelay = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan CoworkerFollowUpDelay = TimeSpan.FromMinutes(30);
     private static readonly TimeSpan ReportingChainEscalationDelay = TimeSpan.FromHours(2);
+    private static readonly JsonSerializerOptions IncrementalJsonOptions = new(JsonSerializerDefaults.Web);
 
     private readonly IAgentLlmClientFactory? _llmClientFactory;
     private readonly ILogger<ProductManagerAgent> _logger;
@@ -252,6 +253,19 @@ or denied. Otherwise perform the task and return a concise completion summary.
                 "Waiting for exactly one active Software Architect reporting to the Product Manager.");
         var architect = architects[0];
         var boardDetail = await EnsureSoftwareTeamBoardAsync(request, roster.Team, context, cancellationToken);
+        var planKey = $"team-{teamId:N}";
+        var requirements = new[] { request.ProductGoal }
+            .Concat(request.Constraints ?? [])
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        var acceptanceCriteria = new[]
+        {
+            request.Rationale,
+            $"A demonstrable increment satisfies the approved product goal: {request.ProductGoal}"
+        }.Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.Ordinal).ToArray();
+        var outcomeEpics = await EnsureIncrementalOutcomeEpicsAsync(
+            boardDetail.Board.Id, boardDetail.Board.Name, planKey, request.ProductGoal,
+            requirements, acceptanceCriteria, context, cancellationToken);
 
         var hub = await context.Platform.Communication.ReadHubAsync(cancellationToken);
         var direct = hub.Chats.SingleOrDefault(x => x.IsDirect &&
@@ -303,8 +317,8 @@ or denied. Otherwise perform the task and return a concise completion summary.
 Welcome aboard. I’ve confirmed your onboarding and started our {boardDetail.Board.Name} planning session.
 Outcome: {request.ProductGoal}
 I’ll own product scope, priorities, requirements, acceptance criteria, publication approval, and sprint
-activation. Start by proposing the outcome Epics that cover the approved goal. We will then review
-Stories and planned sprint groupings before you fully decompose every Story into junior-ready Tasks.
+activation. I created the outcome Epics in Backlog. Start by proposing Stories and planned sprint
+groupings for {outcomeEpics[0].Epic.Title}; after approval, decompose one Story at a time into junior-ready Task pages.
 Keep all tickets in Backlog and leave dates, estimates, repository details, and assignments unset until authoritative.
 """;
             session = await context.Platform.Communication.StartCoordinationAsync(
@@ -321,7 +335,15 @@ Keep all tickets in Backlog and leave dates, estimates, repository details, and 
                     direct.Id,
                     readiness!.ChatTurnId!.Value,
                     readiness.Id,
-                    $"{PlanningCommitmentPrefix}{teamId:N}"),
+                    $"{PlanningCommitmentPrefix}{teamId:N}",
+                    CreateBriefArtifact(new IncrementalProductBrief(
+                        boardDetail.Board.Id,
+                        planKey,
+                        request.ProductGoal,
+                        requirements,
+                        acceptanceCriteria,
+                        outcomeEpics[0].Epic,
+                        "stories"))),
                 cancellationToken);
         }
         else if ((session.Status == AgentCoordinationStatuses.Failed ||
@@ -352,7 +374,8 @@ Keep all tickets in Backlog and leave dates, estimates, repository details, and 
         if (session.Status == AgentCoordinationStatuses.Completed)
         {
             var verification = await VerifyPublishedBacklogAsync(
-                boardDetail.Board.Id, context, cancellationToken);
+                boardDetail.Board.Id, context, cancellationToken,
+                requiredRequirements: requirements);
             if (verification.IsComplete)
                 return PersonalTodoResult.Completed(verification.Summary);
             return PersonalTodoResult.WaitingUntil(
@@ -512,7 +535,357 @@ Keep all tickets in Backlog and leave dates, estimates, repository details, and 
              text.Contains("message", StringComparison.OrdinalIgnoreCase));
     }
 
-    public override async Task<AgentCoordinationTurnResult> HandleCoordinationTurnAsync(
+    private static async Task<IReadOnlyList<ManagedIncrementalEpic>> EnsureIncrementalOutcomeEpicsAsync(
+        Guid boardId,
+        string boardName,
+        string planKey,
+        string productGoal,
+        IReadOnlyList<string> requirements,
+        IReadOnlyList<string> acceptanceCriteria,
+        AgentRuntimeContext context,
+        CancellationToken cancellationToken)
+    {
+        var existing = (await context.Platform.Work.ReadBoardAsync(boardId, cancellationToken)).Items
+            .Where(x => x.Kind == WorkItemKinds.Epic)
+            .Select(x => (Key: ExtractPlanningKey(x.Title), Item: x))
+            .Where(x => !string.IsNullOrWhiteSpace(x.Key))
+            .ToDictionary(x => x.Key!, x => x.Item, StringComparer.OrdinalIgnoreCase);
+        var definitions = new[]
+        {
+            new IncrementalEpic(
+                "EPIC-01",
+                LimitPlanningTitle(boardName, 170),
+                productGoal,
+                acceptanceCriteria),
+            new IncrementalEpic(
+                "EPIC-02",
+                LimitPlanningTitle($"{boardName} Validation", 170),
+                $"Produce objective go/no-go evidence for the approved outcome: {productGoal}",
+                acceptanceCriteria)
+        };
+        var managed = new List<ManagedIncrementalEpic>(definitions.Length);
+        foreach (var epic in definitions)
+        {
+            if (!existing.TryGetValue(epic.Key, out var item))
+            {
+                item = await context.Platform.Work.CreateItemAsync(
+                    new CreateWorkItemRequest(
+                        boardId,
+                        $"[{epic.Key}] {epic.Title}",
+                        $"Outcome: {epic.Outcome}\n\nAcceptance criteria:\n{string.Join(Environment.NewLine, epic.AcceptanceCriteria.Select(x => $"- {x}"))}",
+                        WorkItemKinds.Epic,
+                        WorkPriorities.High,
+                        null,
+                        null,
+                        null,
+                        $"incremental-plan:{planKey}:epic:{NormalizeArtifactKey(epic.Key)}"),
+                    cancellationToken);
+                existing[epic.Key] = item;
+            }
+            managed.Add(new ManagedIncrementalEpic(epic, item.Id));
+        }
+        return managed;
+    }
+
+    private static async Task<WorkBoardDetail> EnsureIncrementalStoriesAsync(
+        Guid boardId,
+        string planKey,
+        ManagedIncrementalEpic epic,
+        IncrementalStoryProposal proposal,
+        AgentRuntimeContext context,
+        CancellationToken cancellationToken)
+    {
+        if (proposal.Stories.Count is < 1 or > 12 || proposal.Stories.Any(x =>
+                string.IsNullOrWhiteSpace(x.Key) || string.IsNullOrWhiteSpace(x.Title) ||
+                x.Requirements.Count == 0 || x.AcceptanceCriteria.Count == 0 ||
+                string.IsNullOrWhiteSpace(x.SprintKey) || x.SprintOrdinal < 1))
+            throw new InvalidOperationException("The Story proposal is incomplete or exceeds its bounded Epic pass.");
+
+        var sprints = (await context.Platform.Work.ListSprintsAsync(boardId, cancellationToken))
+            .ToDictionary(x => x.Sequence ?? 0);
+        foreach (var sprintPlan in proposal.Stories
+                     .GroupBy(x => new { x.SprintOrdinal, x.SprintKey, x.SprintGoal })
+                     .OrderBy(x => x.Key.SprintOrdinal))
+        {
+            if (sprints.ContainsKey(sprintPlan.Key.SprintOrdinal)) continue;
+            var sprint = await context.Platform.Work.CreateSprintAsync(
+                new CreateWorkSprintRequest(
+                    boardId,
+                    LimitPlanningTitle($"Sprint {sprintPlan.Key.SprintOrdinal}: {sprintPlan.Key.SprintGoal}", 160),
+                    sprintPlan.Key.SprintGoal,
+                    null,
+                    null,
+                    $"incremental-plan:{planKey}:sprint:{NormalizeArtifactKey(sprintPlan.Key.SprintKey)}")
+                { Sequence = sprintPlan.Key.SprintOrdinal },
+                cancellationToken);
+            sprints[sprintPlan.Key.SprintOrdinal] = sprint;
+        }
+
+        var detail = await context.Platform.Work.ReadBoardAsync(boardId, cancellationToken);
+        foreach (var proposed in proposal.Stories)
+        {
+            var existingStory = FindItem(detail, proposed.Key, WorkItemKinds.Story);
+            if (existingStory is not null && existingStory.ParentItemId != epic.ItemId)
+                throw new InvalidOperationException(
+                    $"Story key '{proposed.Key}' is already owned by another Epic; Story keys must be plan-wide stable identifiers.");
+        }
+        var itemIds = detail.Items
+            .Where(x => x.Kind == WorkItemKinds.Story)
+            .Select(x => (Key: ExtractPlanningKey(x.Title), x.Id))
+            .Where(x => !string.IsNullOrWhiteSpace(x.Key))
+            .ToDictionary(x => x.Key!, x => x.Id, StringComparer.OrdinalIgnoreCase);
+        var remaining = proposal.Stories.ToList();
+        while (remaining.Count > 0)
+        {
+            var ready = remaining.Where(x => x.Dependencies.All(itemIds.ContainsKey))
+                .OrderBy(x => x.SprintOrdinal).ThenBy(x => x.Key, StringComparer.OrdinalIgnoreCase).ToList();
+            if (ready.Count == 0)
+                throw new InvalidOperationException("The Story proposal contains a cyclic or unresolved dependency.");
+            foreach (var story in ready)
+            {
+                var planning = new WorkItemPlanningSpecification(
+                    story.Requirements,
+                    story.AcceptanceCriteria,
+                    proposal.Risks.Count == 0 ? ["No additional technical risk was identified in this Epic pass."] : proposal.Risks)
+                {
+                    DependencyItemIds = story.Dependencies.Select(key => itemIds[key]).ToArray()
+                };
+                var item = await context.Platform.Work.CreateItemAsync(
+                    new CreateWorkItemRequest(
+                        boardId,
+                        $"[{story.Key}] {LimitPlanningTitle(story.Title, 170)}",
+                        $"Outcome: {story.Outcome}\n\nSprint goal: {story.SprintGoal}",
+                        WorkItemKinds.Story,
+                        WorkPriorities.High,
+                        null,
+                        epic.ItemId,
+                        null,
+                        $"incremental-plan:{planKey}:story:{NormalizeArtifactKey(story.Key)}")
+                    { Planning = planning },
+                    cancellationToken);
+                var sprint = sprints[story.SprintOrdinal];
+                if (item.SprintId != sprint.Id)
+                    item = await context.Platform.Work.SetItemSprintAsync(
+                        new SetWorkItemSprintRequest(
+                            boardId, item.Id, sprint.Id, item.Revision,
+                            $"incremental-plan:{planKey}:story-scope:{NormalizeArtifactKey(story.Key)}"),
+                        cancellationToken);
+                itemIds[story.Key] = item.Id;
+                remaining.Remove(story);
+            }
+        }
+        return await context.Platform.Work.ReadBoardAsync(boardId, cancellationToken);
+    }
+
+    private static AgentCoordinationArtifactSubmission CreateBriefArtifact(IncrementalProductBrief brief) =>
+        new(
+            IncrementalPlanningArtifactTypes.ProductBrief,
+            "1.0",
+            $"{brief.PlanKey}:{brief.Epic.Key}:{brief.Stage}:{brief.Story?.Key ?? "epic"}",
+            brief.PageOrdinal,
+            true,
+            JsonSerializer.SerializeToElement(brief, IncrementalJsonOptions));
+
+    private static IEnumerable<IncrementalStoryProposal> ReadStoryProposals(AgentCoordinationTurnRequest request) =>
+        request.Transcript.Select(x => x.Artifact)
+            .Where(x => x is not null &&
+                string.Equals(x.Type, IncrementalPlanningArtifactTypes.StoryProposal, StringComparison.Ordinal))
+            .Select(x => x!.Payload.Deserialize<IncrementalStoryProposal>(IncrementalJsonOptions))
+            .Where(x => x is not null)
+            .Select(x => x!);
+
+    private static WorkItem? FindItem(WorkBoardDetail detail, string stableKey, string kind) =>
+        detail.Items.SingleOrDefault(x => x.Kind == kind &&
+            string.Equals(ExtractPlanningKey(x.Title), stableKey, StringComparison.OrdinalIgnoreCase));
+
+    private static string? ExtractPlanningKey(string title)
+    {
+        if (!title.StartsWith('[')) return null;
+        var end = title.IndexOf(']');
+        return end > 1 ? title[1..end] : null;
+    }
+
+    private static string NormalizeArtifactKey(string value) =>
+        new(value.Trim().ToLowerInvariant().Select(x => char.IsLetterOrDigit(x) ? x : '-').ToArray());
+
+    private static string LimitPlanningTitle(string value, int maximum) =>
+        value.Length <= maximum ? value : value[..maximum].TrimEnd();
+
+    public override Task<AgentCoordinationTurnResult> HandleCoordinationTurnAsync(
+        AgentCoordinationTurnRequest request,
+        AgentRuntimeContext context,
+        CancellationToken cancellationToken) =>
+        HandleIncrementalCoordinationAsync(request, context, cancellationToken);
+
+    private async Task<AgentCoordinationTurnResult> HandleIncrementalCoordinationAsync(
+        AgentCoordinationTurnRequest request,
+        AgentRuntimeContext context,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        await WakePlanningCommitmentAsync(null, context, cancellationToken);
+        var latest = request.Transcript.OrderByDescending(x => x.Ordinal).FirstOrDefault();
+        if (request.IsFinalization)
+            return AgentCoordinationTurnResult.Completed(
+                $"Product collaboration finalized. {latest?.Content ?? request.Objective}");
+        if (latest?.Artifact is null && latest is not null &&
+            (latest.Content.StartsWith("Epic proposal:", StringComparison.OrdinalIgnoreCase) ||
+             latest.Content.StartsWith("Story and sprint proposal:", StringComparison.OrdinalIgnoreCase)))
+            return await HandleLegacyCoordinationTurnAsync(request, context, cancellationToken);
+
+        var boards = await context.Platform.Work.ListBoardsAsync(
+            new WorkBoardListRequest(IncludeArchived: false), cancellationToken);
+        var board = boards.SingleOrDefault(x => x.ManagerOrganizationUserId == request.Self.OrganizationUserId)
+            ?? (boards.Count == 1 ? boards[0] : null);
+        if (board is null)
+            throw new InvalidOperationException("Exactly one active PM-managed planning board is required.");
+
+        var seedBrief = request.Transcript
+            .OrderBy(x => x.Ordinal)
+            .Select(x => x.Artifact)
+            .Where(x => x is not null &&
+                string.Equals(x.Type, IncrementalPlanningArtifactTypes.ProductBrief, StringComparison.Ordinal))
+            .Select(x => x!.Payload.Deserialize<IncrementalProductBrief>(IncrementalJsonOptions))
+            .FirstOrDefault(x => x is not null);
+        var planKey = seedBrief?.PlanKey ?? $"coordination-{request.SessionId:N}";
+        var productGoal = seedBrief?.ProductGoal ?? request.Objective;
+        var requirements = seedBrief?.Requirements ?? [request.Objective];
+        var acceptance = seedBrief?.AcceptanceCriteria ?? (request.SuccessCriteria.Count > 0
+            ? request.SuccessCriteria
+            : [$"A demonstrable increment satisfies: {request.Objective}"]);
+        var epics = await EnsureIncrementalOutcomeEpicsAsync(
+            board.Id, board.Name, planKey, productGoal, requirements, acceptance,
+            context, cancellationToken);
+
+        if (latest?.Artifact is not { } artifact)
+        {
+            var proposedEpicKeys = ReadStoryProposals(request).Select(x => x.EpicKey)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var nextEpic = epics.FirstOrDefault(x => !proposedEpicKeys.Contains(x.Epic.Key)) ?? epics[0];
+            return AgentCoordinationTurnResult.Continue(
+                $"I persisted the outcome Epics. Propose the Stories and planned sprint grouping for {nextEpic.Epic.Title}.",
+                CreateBriefArtifact(new IncrementalProductBrief(
+                    board.Id, planKey, productGoal, requirements, acceptance,
+                    nextEpic.Epic, "stories")));
+        }
+
+        if (string.Equals(artifact.Type, IncrementalPlanningArtifactTypes.Question, StringComparison.Ordinal))
+        {
+            var question = artifact.Payload.Deserialize<IncrementalArchitectureQuestion>(IncrementalJsonOptions);
+            return AgentCoordinationTurnResult.Blocked(
+                $"Focused product question: {question?.Question ?? latest.Content}");
+        }
+
+        if (string.Equals(artifact.Type, IncrementalPlanningArtifactTypes.StoryProposal, StringComparison.Ordinal))
+        {
+            var proposal = artifact.Payload.Deserialize<IncrementalStoryProposal>(IncrementalJsonOptions)
+                ?? throw new InvalidOperationException("The Story proposal artifact is empty.");
+            var epic = epics.SingleOrDefault(x =>
+                string.Equals(x.Epic.Key, proposal.EpicKey, StringComparison.OrdinalIgnoreCase))
+                ?? throw new InvalidOperationException("The Story proposal does not belong to an approved Epic.");
+            var detail = await EnsureIncrementalStoriesAsync(
+                board.Id, planKey, epic, proposal, context, cancellationToken);
+            var nextStory = proposal.Stories.FirstOrDefault(story =>
+                !detail.Items.Any(item => item.Kind == WorkItemKinds.Task &&
+                    item.ParentItemId == FindItem(detail, story.Key, WorkItemKinds.Story)?.Id));
+            if (nextStory is null)
+                throw new InvalidOperationException("The approved Story proposal did not yield an incomplete Story.");
+            return AgentCoordinationTurnResult.Continue(
+                $"I approved and persisted {proposal.Stories.Count} Story ticket(s) for {epic.Epic.Title}. " +
+                $"Decompose {nextStory.Title} into the first page of junior-ready Tasks.",
+                CreateBriefArtifact(new IncrementalProductBrief(
+                    board.Id, planKey, productGoal, requirements, acceptance,
+                    epic.Epic, "tasks", nextStory, 0)));
+        }
+
+        if (string.Equals(artifact.Type, IncrementalPlanningArtifactTypes.TaskProposal, StringComparison.Ordinal))
+        {
+            var proposal = artifact.Payload.Deserialize<IncrementalTaskProposal>(IncrementalJsonOptions)
+                ?? throw new InvalidOperationException("The Task proposal artifact is empty.");
+            if (proposal.Tasks.Count is < 1 or > 8 || proposal.Tasks.Any(x =>
+                    string.IsNullOrWhiteSpace(x.Key) || string.IsNullOrWhiteSpace(x.Title) ||
+                    string.IsNullOrWhiteSpace(x.Purpose) || string.IsNullOrWhiteSpace(x.AffectedBoundary) ||
+                    string.IsNullOrWhiteSpace(x.DefinitionOfDone) || x.Requirements.Count == 0 ||
+                    x.TechnicalConstraints.Count == 0 || x.EdgeCases.Count == 0 ||
+                    x.TestExpectations.Count == 0 || x.VerificationEvidence.Count == 0) ||
+                proposal.PageOrdinal != artifact.PageOrdinal || proposal.IsFinalPage != artifact.IsFinalPage)
+                throw new InvalidOperationException(
+                    "A Task proposal page must contain one to eight complete junior-ready Tasks and match its artifact envelope.");
+            var detail = await context.Platform.Work.ReadBoardAsync(board.Id, cancellationToken);
+            var storyItem = FindItem(detail, proposal.StoryKey, WorkItemKinds.Story)
+                ?? throw new InvalidOperationException("The Task proposal's parent Story is missing from the board.");
+            if (storyItem.SprintId is not { } sprintId)
+                throw new InvalidOperationException("The Task proposal's parent Story is not assigned to a Planned sprint.");
+            _ = await context.Platform.InvokeAsync<PublishStoryTasksRequest, PublishStoryTasksResponse>(
+                ProductManagerProfile.SoftwareArchitecturePublishStoryTasksCapability,
+                new PublishStoryTasksRequest(
+                    board.Id, storyItem.Id, sprintId, proposal,
+                    "The page is within the approved Story scope and contains junior-ready technical guidance.",
+                    $"incremental-plan:{planKey}:story:{NormalizeArtifactKey(proposal.StoryKey)}:page:{proposal.PageOrdinal}"),
+                cancellationToken);
+
+            var allStoryProposals = ReadStoryProposals(request).ToList();
+            var source = allStoryProposals.SelectMany(x => x.Stories)
+                .First(x => string.Equals(x.Key, proposal.StoryKey, StringComparison.OrdinalIgnoreCase));
+            var owningEpic = epics.Single(x => string.Equals(
+                x.Epic.Key,
+                allStoryProposals.First(p => p.Stories.Any(s =>
+                    string.Equals(s.Key, source.Key, StringComparison.OrdinalIgnoreCase))).EpicKey,
+                StringComparison.OrdinalIgnoreCase));
+            if (!proposal.IsFinalPage)
+                return AgentCoordinationTurnResult.Continue(
+                    $"I approved and published Task page {proposal.PageOrdinal + 1} for {source.Title}. Continue with the next page.",
+                    CreateBriefArtifact(new IncrementalProductBrief(
+                        board.Id, planKey, productGoal, requirements, acceptance,
+                        owningEpic.Epic, "tasks", source, proposal.PageOrdinal + 1)));
+
+            var completedStoryKeys = request.Transcript
+                .Select(x => x.Artifact)
+                .Where(x => x is not null && x.Type == IncrementalPlanningArtifactTypes.TaskProposal && x.IsFinalPage)
+                .Select(x => x!.Payload.Deserialize<IncrementalTaskProposal>(IncrementalJsonOptions)?.StoryKey)
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .Append(proposal.StoryKey)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var nextStory = allStoryProposals.SelectMany(x => x.Stories)
+                .FirstOrDefault(x => !completedStoryKeys.Contains(x.Key));
+            if (nextStory is not null)
+            {
+                var nextEpicKey = allStoryProposals.First(x => x.Stories.Any(s =>
+                    string.Equals(s.Key, nextStory.Key, StringComparison.OrdinalIgnoreCase))).EpicKey;
+                var storyEpic = epics.Single(x => string.Equals(x.Epic.Key, nextEpicKey, StringComparison.OrdinalIgnoreCase));
+                return AgentCoordinationTurnResult.Continue(
+                    $"I approved and published the final Task page for {source.Title}. Next, decompose {nextStory.Title}.",
+                    CreateBriefArtifact(new IncrementalProductBrief(
+                        board.Id, planKey, productGoal, requirements, acceptance,
+                        storyEpic.Epic, "tasks", nextStory, 0)));
+            }
+
+            var proposedEpicKeys = allStoryProposals.Select(x => x.EpicKey).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var nextEpic = epics.FirstOrDefault(x => !proposedEpicKeys.Contains(x.Epic.Key));
+            if (nextEpic is not null)
+                return AgentCoordinationTurnResult.Continue(
+                    $"All Stories in {owningEpic.Epic.Title} are decomposed. Propose Stories for {nextEpic.Epic.Title}.",
+                    CreateBriefArtifact(new IncrementalProductBrief(
+                        board.Id, planKey, productGoal, requirements, acceptance,
+                        nextEpic.Epic, "stories")));
+
+            var verification = await VerifyPublishedBacklogAsync(
+                board.Id, context, cancellationToken,
+                requiredRequirements: requirements);
+            if (!verification.IsComplete)
+                throw new InvalidOperationException($"Incremental backlog verification is incomplete: {verification.Summary}");
+            var sprints = await context.Platform.Work.ListSprintsAsync(board.Id, cancellationToken);
+            var earliest = sprints.OrderBy(x => x.Sequence ?? int.MaxValue).First();
+            await EnsureSprintReadinessCommitmentAsync(board.Id, earliest.Id, context, cancellationToken);
+            return AgentCoordinationTurnResult.Completed(
+                $"Backlog planning is complete. {verification.Summary} All tickets remain Backlog work and all sprints remain Planned.");
+        }
+
+        return AgentCoordinationTurnResult.Continue(
+            "The last turn did not include the expected structured planning artifact. Please return the requested Story or Task proposal artifact.");
+    }
+
+    private async Task<AgentCoordinationTurnResult> HandleLegacyCoordinationTurnAsync(
         AgentCoordinationTurnRequest request,
         AgentRuntimeContext context,
         CancellationToken cancellationToken)
@@ -656,7 +1029,8 @@ Keep all tickets in Backlog and leave dates, estimates, repository details, and 
         Guid boardId,
         AgentRuntimeContext context,
         CancellationToken cancellationToken,
-        ArchitecturePublishResponse? expectedPublication = null)
+        ArchitecturePublishResponse? expectedPublication = null,
+        IReadOnlyList<string>? requiredRequirements = null)
     {
         var detail = await context.Platform.Work.ReadBoardAsync(boardId, cancellationToken);
         var sprints = await context.Platform.Work.ListSprintsAsync(boardId, cancellationToken);
@@ -680,8 +1054,20 @@ Keep all tickets in Backlog and leave dates, estimates, repository details, and 
                 !story.ParentItemId.HasValue || !epicIds.Contains(story.ParentItemId.Value) ||
                 !story.SprintId.HasValue || !HasCompletePlanning(story)))
             return new(false, "every Story must belong to an Epic and sprint and contain complete product guidance");
+        if (epics.Any(epic => !stories.Any(story => story.ParentItemId == epic.Id)))
+            return new(false, "every outcome Epic must contain at least one approved Story");
         if (stories.Any(story => !tasks.Any(task => task.ParentItemId == story.Id)))
             return new(false, "every Story must have at least one child Task");
+        if (requiredRequirements is { Count: > 0 })
+        {
+            var mapped = stories
+                .SelectMany(x => x.Planning?.Requirements ?? [])
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var missing = requiredRequirements.Where(x => !mapped.Contains(x)).ToArray();
+            if (missing.Length > 0)
+                return new(false,
+                    $"approved requirement mapping is incomplete ({missing.Length} requirement(s) are not mapped to a Story)");
+        }
         if (tasks.Any(task =>
                 !task.ParentItemId.HasValue || !storyById.TryGetValue(task.ParentItemId.Value, out var parent) ||
                 !task.SprintId.HasValue || task.SprintId != parent.SprintId || !HasJuniorReadyTask(task)))

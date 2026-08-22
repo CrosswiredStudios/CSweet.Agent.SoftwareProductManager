@@ -2,10 +2,10 @@
 
 This document is the human-readable grant catalog for the C-Sweet Software Product Manager agent. The source
 of truth for installation authorization remains [`csweet-plugin.json`](csweet-plugin.json). This
-catalog was last verified against package version `2.6.2` and manifest protocol `2.0`.
+catalog was last verified against package version `2.7.0` and manifest protocol `2.0`.
 
 Serialized capability names are sourced from the authoritative `CapabilityCatalog` in
-`CSweet.Agent.SDK` 3.11.1; manifest-audit tests reject names missing from that catalog.
+`CSweet.Agent.SDK` 3.12.0; manifest-audit tests reject names missing from that catalog.
 
 ## How to read this catalog
 
@@ -105,6 +105,7 @@ CEO manager. Calls target that Chief's exact installation and validate the CEO-p
 |---|---|---|---|
 | `software-architecture.design.v2` | team | Software Architect | Produce a typed outcome-Epic hierarchy, planned sprint groupings, and complete Task decomposition from approved requirements. |
 | `software-architecture.publish-plan.v2` | team | Software Architect | Publish the explicitly approved hierarchy as planned sprints and Backlog tickets. |
+| `software-architecture.publish-story-tasks.v1` | team | Software Architect | Publish one approved page of at most eight junior-ready Tasks beneath one Story in its Planned sprint. |
 
 The Software Product Manager retains product scope, priority, acceptance criteria, and the explicit publish
 decision. Direct agent conversation carries clarification and feedback; only the separate publish

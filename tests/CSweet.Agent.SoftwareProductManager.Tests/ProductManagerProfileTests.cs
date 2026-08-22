@@ -37,7 +37,8 @@ public sealed class ProductManagerProfileTests
         var providerCapabilities = new HashSet<string>(StringComparer.Ordinal)
         {
             ProductManagerProfile.SoftwareArchitectureDesignCapability,
-            ProductManagerProfile.SoftwareArchitecturePublishCapability
+            ProductManagerProfile.SoftwareArchitecturePublishCapability,
+            ProductManagerProfile.SoftwareArchitecturePublishStoryTasksCapability
         };
         Assert.All(provides.Concat(requires).Where(capability =>
                 !providerCapabilities.Contains(capability!)),
@@ -52,6 +53,9 @@ public sealed class ProductManagerProfileTests
         Assert.Contains(ProductManagerProfile.TeamRosterCapability, requires);
         Assert.Contains(ProductManagerProfile.SoftwareArchitectureDesignCapability, requires);
         Assert.Contains(ProductManagerProfile.SoftwareArchitecturePublishCapability, requires);
+        Assert.Contains(ProductManagerProfile.SoftwareArchitecturePublishStoryTasksCapability, requires);
+        Assert.Contains(WorkSprintCapabilities.Create, requires);
+        Assert.Contains(WorkSprintCapabilities.ManageScope, requires);
         Assert.DoesNotContain(PlatformCapabilities.HiringRecommendationList, requires);
         Assert.DoesNotContain(PlatformCapabilities.HiringRecommendationUpsert, requires);
         Assert.DoesNotContain(PlatformCapabilities.HiringWorkflowStage, requires);
@@ -117,7 +121,7 @@ public sealed class ProductManagerProfileTests
             "src",
             "CSweet.Agent.SoftwareProductManager",
             "CSweet.Agent.SoftwareProductManager.csproj"));
-        Assert.Contains("CSweet.Agent.SDK\" Version=\"3.11.1", project, StringComparison.Ordinal);
+        Assert.Contains("CSweet.Agent.SDK\" Version=\"3.12.0", project, StringComparison.Ordinal);
         Assert.Contains("<ProjectReference", project, StringComparison.Ordinal);
         Assert.Contains($"<Version>{ProductManagerProfile.Version}</Version>", project, StringComparison.Ordinal);
     }
@@ -148,6 +152,10 @@ public sealed class ProductManagerProfileTests
             StringComparison.Ordinal);
         Assert.Contains(
             ProductManagerProfile.SoftwareArchitecturePublishCapability,
+            ProductManagerProfile.SystemPrompt,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            ProductManagerProfile.SoftwareArchitecturePublishStoryTasksCapability,
             ProductManagerProfile.SystemPrompt,
             StringComparison.Ordinal);
         Assert.Contains("direct agent conversation", ProductManagerProfile.SystemPrompt, StringComparison.OrdinalIgnoreCase);
@@ -402,6 +410,12 @@ What level of prototype fidelity are we aiming for?
             .RegisterCapability<WorkBoardReference, WorkBoardDetail>(
                 WorkItemCapabilities.Read,
                 (_, _) => Task.FromResult(new WorkBoardDetail(board, columns, [])))
+            .RegisterCapability<CreateWorkItemRequest, WorkItem>(
+                WorkItemCapabilities.Create,
+                (request, _) => Task.FromResult(new WorkItem(
+                    Guid.NewGuid(), columns[0].Id, request.ParentItemId, null, request.Kind,
+                    request.Title, request.Description ?? string.Empty, "Backlog", request.Priority,
+                    null, 1, 1, null) { Planning = request.Planning }))
             .RegisterCapability<ConfigureSoftwareOrchestrationTemplateRequest, WorkOrchestrationPolicyRevision>(
                 WorkOrchestrationCapabilities.ConfigureSoftwareTemplate,
                 (request, _) => Task.FromResult(new WorkOrchestrationPolicyRevision(
@@ -905,24 +919,6 @@ What level of prototype fidelity are we aiming for?
 
         Assert.Equal(AgentCoordinationDispositions.Continue, third.Disposition);
         Assert.Contains("Task decomposition", third.Content, StringComparison.OrdinalIgnoreCase);
-
-        var fourth = await agent.HandleCoordinationTurnAsync(
-            new AgentCoordinationTurnRequest(
-                sessionId, 7, 7, "Demo delivery", "Complete the demo",
-                ["The demo passes acceptance tests."], self, architect, false,
-                [
-                    initial,
-                    new AgentCoordinationTurn(Guid.NewGuid(), 5, productManagerId,
-                        AgentCoordinationDispositions.Continue, third.Content, now),
-                    new AgentCoordinationTurn(Guid.NewGuid(), 6, architectId,
-                        AgentCoordinationDispositions.Continue,
-                        "Task decomposition complete: API, persistence, rollback, and fault tests.", now)
-                ]),
-            runtime.CreateContext(), CancellationToken.None);
-
-        Assert.Equal(AgentCoordinationDispositions.Blocked, fourth.Disposition);
-        Assert.Empty(created);
-        Assert.Contains("performance target", fourth.Content, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -966,6 +962,12 @@ What level of prototype fidelity are we aiming for?
             .RegisterCapability<WorkBoardListRequest, IReadOnlyList<WorkBoardSummary>>(
                 WorkBoardCapabilities.Read,
                 (_, _) => Task.FromResult<IReadOnlyList<WorkBoardSummary>>([boardSummary]))
+            .RegisterCapability<CreateWorkItemRequest, WorkItem>(
+                WorkItemCapabilities.Create,
+                (request, _) => Task.FromResult(new WorkItem(
+                    Guid.NewGuid(), columnId, request.ParentItemId, null, request.Kind,
+                    request.Title, request.Description ?? string.Empty, "Backlog", request.Priority,
+                    null, 1, 1, null) { Planning = request.Planning }))
             .RegisterCapability<WorkBoardReference, WorkBoardDetail>(
                 WorkItemCapabilities.Read,
                 (_, _) => Task.FromResult(new WorkBoardDetail(
@@ -1089,14 +1091,12 @@ Revert the isolated state module.
                 ]),
             runtime.CreateContext(), CancellationToken.None);
 
-        Assert.Equal(AgentCoordinationDispositions.Completed, result.Disposition);
-        Assert.Single(designCalls);
-        Assert.Single(publishCalls);
-        Assert.False(designCalls[0].RollingRefinement);
-        Assert.Contains("1 outcome Epic", result.Content, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("1 Story", result.Content, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("1 Task", result.Content, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("explicit Product Manager", result.Content, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(AgentCoordinationDispositions.Continue, result.Disposition);
+        Assert.Empty(designCalls);
+        Assert.Empty(publishCalls);
+        Assert.NotNull(result.Artifact);
+        Assert.Equal(IncrementalPlanningArtifactTypes.ProductBrief, result.Artifact!.Type);
+        Assert.Contains("persisted the outcome Epics", result.Content, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

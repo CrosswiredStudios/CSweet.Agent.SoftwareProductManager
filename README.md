@@ -1,7 +1,7 @@
 # C-Sweet Software Product Manager
 
-First-party Software Product Manager agent for C-Sweet, built on `CSweet.Agent.SDK` 3.11.1 and manifest protocol v2.
-The agent package version is `2.6.2`.
+First-party Software Product Manager agent for C-Sweet, built on `CSweet.Agent.SDK` 3.12.0 and manifest protocol v2.
+The agent package version is `2.7.0`.
 
 It owns product outcomes, customer discovery, product strategy, prioritization, roadmaps, requirements, success measures, delivery alignment, and product-team design. It does not choose technical architecture, write production code, make legal conclusions, source candidates, hire workers, or spend money.
 
@@ -46,13 +46,14 @@ publication capability only after approval and repository/base-branch selection.
 selection gates publication and assignment, not drafting. The Architect owns technical direction;
 the Product Manager retains product scope and priority.
 
-Architecture planning uses `software-architecture.design.v2` and
-`software-architecture.publish-plan.v2`. One PM-owned personal commitment supervises the approved
-goal through staged Epic approval, Story and sprint approval, complete Task decomposition,
-publication, and strict board verification. The provider returns outcome Epics, Stories grouped
-into planned sprints, and junior-ready child Tasks for every Story. Publication leaves all work in
-Backlog and every sprint Planned. Only a separate PM-owned sprint-readiness commitment may later
-preflight and explicitly start one eligible sprint.
+Architecture planning is incremental. The PM persists outcome Epics first, requests bounded Story
+and sprint proposals for one Epic at a time, then approves Task pages of at most eight Tasks for one
+Story at a time through `software-architecture.publish-story-tasks.v1`. Structured coordination
+artifacts prevent any generation request from carrying the complete project or transcript. The
+legacy `software-architecture.design.v2` and `software-architecture.publish-plan.v2` capabilities
+remain compatible. One PM-owned personal commitment stays Doing through strict board verification.
+All published work remains Backlog and every sprint remains Planned. Only a separate PM-owned
+sprint-readiness commitment may later preflight and explicitly start one eligible sprint.
 
 An explicit direct message from the active Software Architect only wakes the durable planning
 commitment. The commitment reconciles the board, transcript, roster, bindings, and authoritative
@@ -78,7 +79,7 @@ dotnet build CSweet.Agent.SoftwareProductManager.slnx
 dotnet test CSweet.Agent.SoftwareProductManager.slnx
 ```
 
-Requirements are .NET 10, `CSweet.Agent.SDK` 3.11.1, `CSweet.Memory`, an approved protocol-v2 installation, an active managing employee, and the grants in [GRANTS.md](GRANTS.md).
+Requirements are .NET 10, `CSweet.Agent.SDK` 3.12.0, `CSweet.Memory`, an approved protocol-v2 installation, an active managing employee, and the grants in [GRANTS.md](GRANTS.md).
 
 ## SDK 1.1.1 authoring contract
 
