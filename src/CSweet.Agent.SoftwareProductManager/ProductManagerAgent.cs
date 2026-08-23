@@ -2774,13 +2774,13 @@ Retry now. The ensure_software_team_board tool is required. Use its structured r
         var onboardingRequest = $"""
 This is your first message after being hired as Software Product Manager. Address your managing employee, {manager.DisplayName}.
 
-Review the authoritative business, finance, organization, objective, workstream, and pattern context. Also use only relevant approved C-Sweet organization and relationship memory supplied to you by the memory provider. Current authoritative records and manager direction outrank recalled memory.
+Use the supplied business context privately to ground the message. Current records and manager direction outrank recalled memory.
 
-Do not send a generic welcome, announce that you are merely ready to begin, or ask the manager to repeat facts already available. Lead with your best current determination of the specific product or deliverable you are managing, its target customer, and the immediate outcome. Clearly distinguish authoritative facts from any inference.
+Write like a concise coworker in chat: two to four short sentences and no more than 80 words. Mention only the single most relevant known product outcome. State what you will do next, and ask exactly one focused question only when information is genuinely missing.
 
-If the context is sufficient, briefly explain that you are now designing the smallest cross-functional team needed to deliver that outcome and will submit the complete team to the manager for approval. Do not claim that roles are approved, sourced, or hired, and do not present a finalized role list in this opening message; the structured onboarding workflow immediately following this message handles the team proposal and approval request.
+Do not use headings, bullet points, labeled sections, or a status-report format. Do not recite the business profile, objective dates, workflow mechanics, evidence catalog, lifecycle stage, facts-versus-inference analysis, or everything you considered. Never use phrases such as “authoritative context,” “pattern catalog,” or “structured onboarding workflow” in the message.
 
-If the context is not sufficient to identify the deliverable responsibly, state what you already understand and ask exactly one highest-value clarification. Do not use a multi-part intake questionnaire or invoke an action tool from this opening-message generation.
+Do not claim that roles are approved, sourced, or hired, and do not invoke an action tool from this opening-message generation.
 """;
 
         try
@@ -2805,7 +2805,12 @@ If the context is not sufficient to identify the deliverable responsibly, state 
 
             if (!string.IsNullOrWhiteSpace(response.Response))
             {
-                return response.Response.Trim();
+                if (IsNaturalOnboardingMessage(response.Response))
+                    return response.Response.Trim();
+                _logger.LogWarning(
+                    "Software Product Manager onboarding generation exceeded conversational style limits for installation {InstallationId}; using the concise fallback.",
+                    context.InstallationId);
+                return fallback;
             }
 
             _logger.LogWarning(
@@ -2821,6 +2826,33 @@ If the context is not sufficient to identify the deliverable responsibly, state 
         }
 
         return fallback;
+    }
+
+    internal static bool IsNaturalOnboardingMessage(string? message)
+    {
+        if (string.IsNullOrWhiteSpace(message))
+            return false;
+        var trimmed = message.Trim();
+        if (trimmed.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length > 80)
+            return false;
+        if (trimmed.Contains("**", StringComparison.Ordinal) ||
+            trimmed.Split('\n').Any(line =>
+                line.TrimStart().StartsWith('#') ||
+                line.TrimStart().StartsWith("- ", StringComparison.Ordinal) ||
+                line.TrimStart().StartsWith("* ", StringComparison.Ordinal)))
+            return false;
+        string[] internalLanguage =
+        [
+            "authoritative context",
+            "facts vs. inference",
+            "facts vs inference",
+            "pattern catalog",
+            "structured onboarding workflow",
+            "what i'm managing",
+            "what i’m managing"
+        ];
+        return internalLanguage.All(phrase =>
+            !trimmed.Contains(phrase, StringComparison.OrdinalIgnoreCase));
     }
 
     private static bool IsChiefOfStaff(

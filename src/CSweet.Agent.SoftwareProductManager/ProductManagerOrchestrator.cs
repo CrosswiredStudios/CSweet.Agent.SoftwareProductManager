@@ -90,43 +90,44 @@ Route missing executive information through the managing employee; call the Chie
 
         var question = profile switch
         {
-            null => "What business, customer, and first product outcome should I own?",
+            null => "what business and first product outcome should I own?",
             { TargetCustomers.Count: 0 } =>
-                "Which specific customer and problem should I treat as the first product priority?",
+                "who are we building the first product for?",
             { Offerings.Count: 0 } =>
-                "What first product or customer outcome should I be accountable for?",
+                "what first product or customer outcome should I prioritize?",
             _ when string.IsNullOrWhiteSpace(deliverable) =>
-                "What first measurable product outcome, target date, and success measure should I own?",
+                "what first measurable product outcome should I own?",
             _ when context.FinancialProfile?.MaximumMonthlyWorkforceSpend is null =>
-                "What workforce constraint should govern the initial product team?",
+                "are there any budget or staffing constraints I should plan around?",
             _ => null
         };
 
+        var businessName = CompactForChat(profile?.Name, 6) ?? "the business";
+        var productFocus = CompactForChat(deliverable, 14);
+
         if (question is not null)
         {
-            var knownBusiness = profile is null
-                ? "I do not yet have an authoritative business profile."
-                : $"I reviewed {profile.Name}" +
-                  (string.IsNullOrWhiteSpace(profile.LifecycleStage)
-                      ? "."
-                      : $" at the {profile.LifecycleStage} stage.");
-            var knownProduct = string.IsNullOrWhiteSpace(deliverable)
-                ? string.Empty
-                : $" My current product focus is {deliverable}.";
-            return $"""
-Hi {managerDisplayName} — {knownBusiness}{knownProduct}
-
-Before I finalize the deliverable and its smallest viable team: {question}
-""";
+            var knownFocus = productFocus is null
+                ? $"I’m ready to learn more about {businessName}."
+                : $"I understand {businessName} is focused on {productFocus}.";
+            return $"Hi {managerDisplayName} — I’m onboarded and ready to get started. " +
+                   $"{knownFocus} Before I put together the initial product plan and team recommendation, {question}";
         }
 
-        return $"""
-Hi {managerDisplayName} — I reviewed the current business, operating context, and available approved memory for {profile!.Name}.
+        var audience = CompactForChat(customer, 8) ?? "the first customer group";
+        return $"Hi {managerDisplayName} — I’m onboarded and ready to get started. " +
+               $"I understand {businessName} is focused on {productFocus} for {audience}. " +
+               "I’ll put together the initial product plan and smallest team recommendation for your review.";
+    }
 
-My current product assignment is to manage **{deliverable}** for **{customer}**, beginning with **{offering}**. I’ll treat that as the working deliverable unless newer authoritative direction changes it.
-
-I’m now designing the smallest cross-functional team that can own this outcome safely. I’ll submit the complete team as one proposal for your approval before treating any role as approved or starting the product-team board.
-""";
+    private static string? CompactForChat(string? value, int maximumWords)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return null;
+        var words = value.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+        return words.Length <= maximumWords
+            ? string.Join(' ', words).Trim().TrimEnd('.', ':', ';')
+            : $"{string.Join(' ', words.Take(maximumWords)).TrimEnd('.', ':', ';')}…";
     }
 
     public static ProductPlanResponse BuildProductPlan(ProductPlanRequest request, ProductOperatingContext context)

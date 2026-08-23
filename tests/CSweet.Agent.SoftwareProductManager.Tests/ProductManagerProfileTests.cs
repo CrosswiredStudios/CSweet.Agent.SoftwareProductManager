@@ -892,10 +892,11 @@ What level of prototype fidelity are we aiming for?
 
         Assert.Contains("Deliver a playable browser prototype", message, StringComparison.Ordinal);
         Assert.Contains("Classic game fans", message, StringComparison.Ordinal);
-        Assert.Contains("smallest cross-functional team", message, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("one proposal for your approval", message, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("ready to begin", message, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("Please confirm my mandate", message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("smallest team recommendation", message, StringComparison.OrdinalIgnoreCase);
+        Assert.True(message.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length <= 80);
+        Assert.DoesNotContain("**", message, StringComparison.Ordinal);
+        Assert.DoesNotContain("authoritative", message, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("\n\n", message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1044,11 +1045,34 @@ What level of prototype fidelity are we aiming for?
         Assert.Null(staffingCommitment.SourceMessageId);
         Assert.Contains("Super Awesome Games", chatClient.Prompt, StringComparison.Ordinal);
         Assert.Contains("Deliver a playable browser prototype", chatClient.Prompt, StringComparison.Ordinal);
-        Assert.Contains("approved C-Sweet organization", chatClient.Prompt, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("Do not send a generic welcome", chatClient.Prompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Use the supplied business context privately", chatClient.Prompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("no more than 80 words", chatClient.Prompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("concise coworker", chatClient.Prompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Do not use headings", chatClient.Prompt, StringComparison.OrdinalIgnoreCase);
         Assert.NotNull(completionRequest);
         Assert.Equal(onboardingEventId, completionRequest.EventId);
         Assert.NotEqual(workItemId, completionRequest.EventId);
+    }
+
+    [Fact]
+    public void OnboardingStyleGuardRejectsInternalBriefingsAndAcceptsNaturalChat()
+    {
+        const string natural =
+            "Hi Matt — I’m onboarded and ready to get started. I understand we’re focused on web games. Who are we building the first game for?";
+        var briefing = $"""
+Product Manager — my first message.
+
+What I'm managing (from authoritative context):
+
+- Business: Super Awesome Games.
+- Objective: Turn the mission into an operating plan.
+
+Facts vs. inference: the pattern catalog says we should validate first. The structured onboarding workflow will follow.
+{string.Join(' ', Enumerable.Repeat("detail", 70))}
+""";
+
+        Assert.True(ProductManagerAgent.IsNaturalOnboardingMessage(natural));
+        Assert.False(ProductManagerAgent.IsNaturalOnboardingMessage(briefing));
     }
 
     [Fact]
