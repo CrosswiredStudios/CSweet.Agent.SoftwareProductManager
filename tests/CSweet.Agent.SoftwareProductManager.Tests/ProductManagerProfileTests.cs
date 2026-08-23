@@ -289,9 +289,9 @@ public sealed class ProductManagerProfileTests
             .RegisterCapability<object, OrganizationSnapshotResponse>(
                 PlatformCapabilities.OrganizationSnapshotRead,
                 (_, _) => Task.FromResult(organization))
-            .RegisterCapability<JsonElement, object>(
+            .RegisterCapability<object, CommunicationHub>(
                 CommunicationCapabilities.ChatRead,
-                (_, _) => Task.FromResult<object>(new CommunicationHub(
+                (_, _) => Task.FromResult(new CommunicationHub(
                     productManagerId, productManagerId, false, true, [direct])))
             .RegisterCapability<object, PersonalTodoDirectory>(
                 PersonalTodoCapabilities.Read,
@@ -300,6 +300,7 @@ public sealed class ProductManagerProfileTests
                 PersonalTodoCapabilities.Add,
                 (request, _) =>
                 {
+                    Assert.Equal(request.SourceConversationId.HasValue, request.SourceMessageId.HasValue);
                     added = request;
                     return Task.FromResult(new PersonalTodoItem(
                         Guid.NewGuid(), Guid.NewGuid(), productManagerId, productManagerId,
@@ -329,7 +330,8 @@ public sealed class ProductManagerProfileTests
 
         Assert.NotNull(added);
         Assert.Equal($"product-team-staffing:{installationId:N}", added.CorrelationId);
-        Assert.Equal(conversationId, added.SourceConversationId);
+        Assert.Null(added.SourceConversationId);
+        Assert.Null(added.SourceMessageId);
     }
 
     [Fact]
@@ -416,6 +418,81 @@ public sealed class ProductManagerProfileTests
         Assert.NotNull(requeued);
         Assert.Equal(commitment.Id, requeued.ItemId);
         Assert.Contains(messageId.ToString("N"), requeued.IdempotencyKey, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task StaffingCommitmentWithoutManagerDirectionSendsOneRecoverableIntroductionThenWaits()
+    {
+        var organizationId = Guid.NewGuid();
+        var installationId = Guid.NewGuid();
+        var productManagerId = Guid.NewGuid();
+        var managerId = Guid.NewGuid();
+        var conversationId = Guid.NewGuid();
+        var item = new PersonalTodoItem(
+            Guid.NewGuid(), Guid.NewGuid(), productManagerId, productManagerId,
+            "Product Manager", "Recommend initial product team", "Submit the team request.",
+            PersonalTodoStatuses.Running, "High", 1024, 1, null, null, null,
+            [], null, null, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow)
+        {
+            CorrelationId = $"product-team-staffing:{installationId:N}"
+        };
+        var organization = new OrganizationSnapshotResponse(
+            organizationId, "Active",
+            [
+                new OrganizationPerson(productManagerId, "Product Manager", "Agent", null,
+                    managerId, installationId, true),
+                new OrganizationPerson(managerId, "Matt", "Human", null, null, null, true)
+            ], [], [], [], [], DateTimeOffset.UtcNow);
+        var direct = new CommunicationChat(
+            conversationId, "Product Manager", "Private reporting conversation.", true, true,
+            false, true, DateTimeOffset.UtcNow,
+            [
+                new CommunicationParticipant(productManagerId, "Product Manager", "Agent", "Product Manager"),
+                new CommunicationParticipant(managerId, "Matt", "Human", "CEO")
+            ], null, null, 0);
+        var transcript = new List<CommunicationMessage>();
+        var sends = new List<CommunicationSendCapture>();
+        var runtime = new AgentTestRuntime()
+            .RegisterCapability<ResourceChangeReadRequest, ResourceChangeReadResponse>(
+                PlatformCapabilities.ResourceChangeRead,
+                (_, _) => Task.FromResult(new ResourceChangeReadResponse([])))
+            .RegisterCapability<object, OrganizationSnapshotResponse>(
+                PlatformCapabilities.OrganizationSnapshotRead,
+                (_, _) => Task.FromResult(organization))
+            .RegisterCapability<JsonElement, JsonElement>(
+                CommunicationCapabilities.ChatRead,
+                (request, _) => Task.FromResult(request.TryGetProperty("chatId", out var _)
+                    ? JsonSerializer.SerializeToElement(new CommunicationMessages(transcript))
+                    : JsonSerializer.SerializeToElement(new CommunicationHub(
+                        productManagerId, productManagerId, false, true, [direct]))))
+            .RegisterCapability<CommunicationSendCapture, CommunicationMessage>(
+                ProductManagerProfile.SendCommunicationMessageCapability,
+                (request, _) =>
+                {
+                    sends.Add(request);
+                    var sent = new CommunicationMessage(
+                        Guid.NewGuid(), transcript.Count + 1, request.ChatId, productManagerId,
+                        "Product Manager", "Agent", request.Content, DateTimeOffset.UtcNow,
+                        Guid.NewGuid());
+                    transcript.Add(sent);
+                    return Task.FromResult(sent);
+                });
+        var context = runtime.CreateContext(
+            organizationId.ToString("D"), installationId.ToString("D"),
+            new AgentIdentity(productManagerId.ToString("D"), "Product Manager", null,
+                "Product Manager", null, [], null, managerId.ToString("D"), "Matt"));
+        var agent = new ProductManagerAgent(
+            NullLogger<ProductManagerAgent>.Instance,
+            new ProductManagerOrchestrator(NullLogger<ProductManagerOrchestrator>.Instance));
+
+        var first = await agent.HandlePersonalTodoAsync(item, context, CancellationToken.None);
+        var replay = await agent.HandlePersonalTodoAsync(item, context, CancellationToken.None);
+
+        Assert.NotNull(first);
+        Assert.NotNull(replay);
+        var sent = Assert.Single(sends);
+        Assert.Equal(conversationId, sent.ChatId);
+        Assert.Equal($"product-manager-onboarding-direction:{installationId:N}", sent.IdempotencyKey);
     }
 
     [Fact]
@@ -834,6 +911,7 @@ What level of prototype fidelity are we aiming for?
         var workItemId = Guid.NewGuid();
         var generatedOpening = "I’m managing the playable browser prototype for classic game fans. I’m now shaping the smallest team and will submit it for approval.";
         CommunicationSendCapture? sentMessage = null;
+        AddPersonalTodoItemRequest? staffingCommitment = null;
         CompleteAgentOnboardingRequest? completionRequest = null;
         var profile = new BusinessProfileResponse(
             organizationId,
@@ -898,16 +976,21 @@ What level of prototype fidelity are we aiming for?
                 (_, _) => Task.FromResult(new PersonalTodoDirectory([], productManagerId)))
             .RegisterCapability<AddPersonalTodoItemRequest, PersonalTodoItem>(
                 PersonalTodoCapabilities.Add,
-                (request, _) => Task.FromResult(new PersonalTodoItem(
-                    Guid.NewGuid(), Guid.NewGuid(), productManagerId, productManagerId,
-                    ProductManagerProfile.DefaultDisplayName, request.Title,
-                    request.Description ?? string.Empty, PersonalTodoStatuses.Ready,
-                    request.Priority, 1024, 1, null, request.SourceConversationId,
-                    request.SourceMessageId, [], null, null, DateTimeOffset.UtcNow,
-                    DateTimeOffset.UtcNow)
+                (request, _) =>
                 {
-                    CorrelationId = request.CorrelationId
-                }))
+                    Assert.Equal(request.SourceConversationId.HasValue, request.SourceMessageId.HasValue);
+                    staffingCommitment = request;
+                    return Task.FromResult(new PersonalTodoItem(
+                        Guid.NewGuid(), Guid.NewGuid(), productManagerId, productManagerId,
+                        ProductManagerProfile.DefaultDisplayName, request.Title,
+                        request.Description ?? string.Empty, PersonalTodoStatuses.Ready,
+                        request.Priority, 1024, 1, null, request.SourceConversationId,
+                        request.SourceMessageId, [], null, null, DateTimeOffset.UtcNow,
+                        DateTimeOffset.UtcNow)
+                    {
+                        CorrelationId = request.CorrelationId
+                    });
+                })
             .RegisterCapability<CompleteAgentOnboardingRequest, JsonElement>(
                 AgentLifecycleCapabilities.CompleteOnboarding,
                 (request, _) =>
@@ -956,6 +1039,9 @@ What level of prototype fidelity are we aiming for?
         Assert.NotNull(sentMessage);
         Assert.Equal(conversationId, sentMessage.ChatId);
         Assert.Equal(generatedOpening, sentMessage.Content);
+        Assert.NotNull(staffingCommitment);
+        Assert.Null(staffingCommitment.SourceConversationId);
+        Assert.Null(staffingCommitment.SourceMessageId);
         Assert.Contains("Super Awesome Games", chatClient.Prompt, StringComparison.Ordinal);
         Assert.Contains("Deliver a playable browser prototype", chatClient.Prompt, StringComparison.Ordinal);
         Assert.Contains("approved C-Sweet organization", chatClient.Prompt, StringComparison.OrdinalIgnoreCase);

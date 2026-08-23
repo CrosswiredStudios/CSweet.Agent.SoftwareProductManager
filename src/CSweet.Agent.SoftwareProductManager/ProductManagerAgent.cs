@@ -180,10 +180,8 @@ or denied. Otherwise perform the task and return a concise completion summary.
             var manager = self is null ? null : FindCeoManager(self, operatingContext.Organization!);
             if (self is null || manager is null)
                 return;
-            var conversationId = await FindOrCreateManagerConversationAsync(
-                self, manager, context, $"staffing-attention:{installationId:N}", cancellationToken);
             _ = await EnsureStaffingCommitmentAsync(
-                installationId, conversationId, context, cancellationToken);
+                installationId, context, cancellationToken);
             return;
         }
 
@@ -217,7 +215,6 @@ or denied. Otherwise perform the task and return a concise completion summary.
 
     private static async Task<PersonalTodoItem> EnsureStaffingCommitmentAsync(
         Guid installationId,
-        Guid managerConversationId,
         AgentRuntimeContext context,
         CancellationToken cancellationToken)
     {
@@ -238,7 +235,6 @@ or denied. Otherwise perform the task and return a concise completion summary.
                 "High",
                 null,
                 $"staffing-commitment:{installationId:N}",
-                SourceConversationId: managerConversationId,
                 CorrelationId: correlationId),
             cancellationToken);
     }
@@ -294,6 +290,19 @@ or denied. Otherwise perform the task and return a concise completion summary.
             .FirstOrDefault();
         if (managerDirection is null)
         {
+            var directionAlreadyRequested = transcript.Messages.Any(x =>
+                x.SenderOrganizationUserId == self.Id);
+            if (!directionAlreadyRequested)
+            {
+                await SendManagerDirectionRequestAsync(
+                    conversationId,
+                    manager,
+                    operatingContext,
+                    item.Id,
+                    context,
+                    $"product-manager-onboarding-direction:{installationId:N}",
+                    cancellationToken);
+            }
             return PersonalTodoResult.WaitingUntil(
                 DateTimeOffset.UtcNow.Add(InternalReviewDelay),
                 "Waiting for the manager to answer the product-team scoping question.",
@@ -1903,7 +1912,7 @@ Retry now. The ensure_software_team_board tool is required. Use its structured r
             return false;
 
         var commitment = await EnsureStaffingCommitmentAsync(
-            installationId, conversationId, context, cancellationToken);
+            installationId, context, cancellationToken);
         var isWaiting = commitment.Status == PersonalTodoStatuses.Running && commitment.Wait is not null;
         if (commitment.Status is PersonalTodoStatuses.Backlog or PersonalTodoStatuses.Blocked || isWaiting)
         {
@@ -2665,7 +2674,6 @@ Retry now. The ensure_software_team_board tool is required. Use its structured r
                 cancellationToken);
         _ = await EnsureStaffingCommitmentAsync(
             installationId,
-            managerConversationId,
             context,
             cancellationToken);
         await SendManagerDirectionRequestAsync(
@@ -2674,7 +2682,7 @@ Retry now. The ensure_software_team_board tool is required. Use its structured r
             operatingContext,
             eventId,
             context,
-            message.EventId.ToString("N"),
+            $"product-manager-onboarding-direction:{installationId:N}",
             cancellationToken);
 
         var chiefLiaison = FindChiefLiaison(self, organization);
@@ -2739,7 +2747,7 @@ Retry now. The ensure_software_team_board tool is required. Use its structured r
         _ = await context.Platform.Communication.SendMessageAsync(
             managerConversationId,
             openingMessage,
-            $"product-manager-onboarding-direction:{eventId:D}",
+            correlationId,
             cancellationToken);
     }
 
