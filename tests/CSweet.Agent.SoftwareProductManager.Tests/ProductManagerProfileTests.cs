@@ -248,6 +248,212 @@ public sealed class ProductManagerProfileTests
     }
 
     [Fact]
+    public async Task AttentionBeforeTeamApprovalCreatesStaffingCommitmentWithoutReadingTeamRoster()
+    {
+        var organizationId = Guid.NewGuid();
+        var installationId = Guid.NewGuid();
+        var productManagerId = Guid.NewGuid();
+        var managerId = Guid.NewGuid();
+        var conversationId = Guid.NewGuid();
+        var organization = new OrganizationSnapshotResponse(
+            organizationId,
+            "Active",
+            [
+                new OrganizationPerson(productManagerId, "Product Manager", "Agent", null,
+                    managerId, installationId, true),
+                new OrganizationPerson(managerId, "Matt", "Human", null,
+                    null, null, true)
+            ],
+            [], [], [], [], DateTimeOffset.UtcNow);
+        var direct = new CommunicationChat(
+            conversationId,
+            "Product Manager",
+            "Private reporting conversation.",
+            true,
+            true,
+            false,
+            true,
+            DateTimeOffset.UtcNow,
+            [
+                new CommunicationParticipant(productManagerId, "Product Manager", "Agent", "Product Manager"),
+                new CommunicationParticipant(managerId, "Matt", "Human", "CEO")
+            ],
+            null,
+            null,
+            0);
+        AddPersonalTodoItemRequest? added = null;
+        var runtime = new AgentTestRuntime()
+            .RegisterCapability<ResourceChangeReadRequest, ResourceChangeReadResponse>(
+                PlatformCapabilities.ResourceChangeRead,
+                (_, _) => Task.FromResult(new ResourceChangeReadResponse([])))
+            .RegisterCapability<object, OrganizationSnapshotResponse>(
+                PlatformCapabilities.OrganizationSnapshotRead,
+                (_, _) => Task.FromResult(organization))
+            .RegisterCapability<JsonElement, object>(
+                CommunicationCapabilities.ChatRead,
+                (_, _) => Task.FromResult<object>(new CommunicationHub(
+                    productManagerId, productManagerId, false, true, [direct])))
+            .RegisterCapability<object, PersonalTodoDirectory>(
+                PersonalTodoCapabilities.Read,
+                (_, _) => Task.FromResult(new PersonalTodoDirectory([], productManagerId)))
+            .RegisterCapability<AddPersonalTodoItemRequest, PersonalTodoItem>(
+                PersonalTodoCapabilities.Add,
+                (request, _) =>
+                {
+                    added = request;
+                    return Task.FromResult(new PersonalTodoItem(
+                        Guid.NewGuid(), Guid.NewGuid(), productManagerId, productManagerId,
+                        "Product Manager", request.Title, request.Description ?? string.Empty,
+                        PersonalTodoStatuses.Ready, request.Priority, 1024, 1, null,
+                        request.SourceConversationId, request.SourceMessageId, [], null, null,
+                        DateTimeOffset.UtcNow, DateTimeOffset.UtcNow)
+                    {
+                        CorrelationId = request.CorrelationId
+                    });
+                });
+        var context = runtime.CreateContext(
+            organizationId.ToString("D"),
+            installationId.ToString("D"),
+            new AgentIdentity(
+                productManagerId.ToString("D"), "Product Manager", null, "Product Manager",
+                null, [], null, managerId.ToString("D"), "Matt"));
+        var agent = new ProductManagerAgent(
+            NullLogger<ProductManagerAgent>.Instance,
+            new ProductManagerOrchestrator(NullLogger<ProductManagerOrchestrator>.Instance));
+        var now = DateTimeOffset.UtcNow;
+
+        await agent.HandleAttentionReviewAsync(
+            new AgentAttentionReviewContext(Guid.NewGuid(), now, now.AddMinutes(5), AgentAttentionReasons.Periodic),
+            context,
+            CancellationToken.None);
+
+        Assert.NotNull(added);
+        Assert.Equal($"product-team-staffing:{installationId:N}", added.CorrelationId);
+        Assert.Equal(conversationId, added.SourceConversationId);
+    }
+
+    [Fact]
+    public async Task ManagerReplyWakesWaitingStaffingCommitmentWithoutStartingGeneralChatGeneration()
+    {
+        var organizationId = Guid.NewGuid();
+        var installationId = Guid.NewGuid();
+        var productManagerId = Guid.NewGuid();
+        var managerId = Guid.NewGuid();
+        var conversationId = Guid.NewGuid();
+        var commitment = new PersonalTodoItem(
+            Guid.NewGuid(), Guid.NewGuid(), productManagerId, productManagerId,
+            "Product Manager", "Recommend initial product team", "Submit the team request.",
+            PersonalTodoStatuses.Running, "High", 1024, 3, null, conversationId, null,
+            [], null, null, DateTimeOffset.UtcNow.AddMinutes(-10), DateTimeOffset.UtcNow)
+        {
+            CorrelationId = $"product-team-staffing:{installationId:N}",
+            Wait = new PersonalTodoWaitState(
+                DateTimeOffset.UtcNow.AddMinutes(5), "Waiting for manager direction.", managerId)
+        };
+        var organization = new OrganizationSnapshotResponse(
+            organizationId, "Active",
+            [
+                new OrganizationPerson(productManagerId, "Product Manager", "Agent", null,
+                    managerId, installationId, true),
+                new OrganizationPerson(managerId, "Matt", "Human", null, null, null, true)
+            ], [], [], [], [], DateTimeOffset.UtcNow);
+        RequeuePersonalTodoItemRequest? requeued = null;
+        var runtime = new AgentTestRuntime()
+            .RegisterCapability<object, OrganizationSnapshotResponse>(
+                PlatformCapabilities.OrganizationSnapshotRead,
+                (_, _) => Task.FromResult(organization))
+            .RegisterCapability<ResourceChangeReadRequest, ResourceChangeReadResponse>(
+                PlatformCapabilities.ResourceChangeRead,
+                (_, _) => Task.FromResult(new ResourceChangeReadResponse([])))
+            .RegisterCapability<object, PersonalTodoDirectory>(
+                PersonalTodoCapabilities.Read,
+                (_, _) => Task.FromResult(new PersonalTodoDirectory([
+                    new PersonalTodoBoard(Guid.NewGuid(), productManagerId, "Product Manager",
+                        managerId, "Matt", 1, [commitment])
+                ], productManagerId)))
+            .RegisterCapability<RequeuePersonalTodoItemRequest, PersonalTodoItem>(
+                PersonalTodoCapabilities.Requeue,
+                (request, _) =>
+                {
+                    requeued = request;
+                    return Task.FromResult(commitment with
+                    {
+                        Status = PersonalTodoStatuses.Ready,
+                        Revision = commitment.Revision + 1,
+                        Wait = null
+                    });
+                });
+        var context = runtime.CreateContext(
+            organizationId.ToString("D"),
+            installationId.ToString("D"),
+            new AgentIdentity(productManagerId.ToString("D"), "Product Manager", null,
+                "Product Manager", null, [], null, managerId.ToString("D"), "Matt"));
+        var agent = new ProductManagerAgent(
+            NullLogger<ProductManagerAgent>.Instance,
+            new ProductManagerOrchestrator(NullLogger<ProductManagerOrchestrator>.Instance));
+        var turnId = Guid.NewGuid();
+        var messageId = Guid.NewGuid();
+
+        await agent.HandleEventAsync(
+            new AgentEventEnvelope(
+                Guid.NewGuid(), Guid.NewGuid(), ProductManagerProfile.UserMessageReceivedEvent,
+                JsonSerializer.SerializeToElement(new CommunicationMessageReceivedEvent(
+                    Guid.NewGuid(), conversationId.ToString("D"), managerId.ToString("D"),
+                    "Make a Mario Kart clone PoC. There are no budget or time constraints.",
+                    new Dictionary<string, string>
+                    {
+                        [CommunicationMessageContextKeys.SenderEmployeeType] = "Human",
+                        [CommunicationMessageContextKeys.SenderOrganizationUserId] = managerId.ToString("D"),
+                        [CommunicationMessageContextKeys.SenderDisplayName] = "Matt",
+                        [CommunicationMessageContextKeys.SenderRole] = "CEO"
+                    },
+                    TurnId: turnId,
+                    MessageId: messageId)),
+                DateTimeOffset.UtcNow),
+            context,
+            CancellationToken.None);
+
+        Assert.NotNull(requeued);
+        Assert.Equal(commitment.Id, requeued.ItemId);
+        Assert.Contains(messageId.ToString("N"), requeued.IdempotencyKey, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void BoundedHiringPromptIncludesOnlyCompactDecisionContext()
+    {
+        var business = new BusinessProfileResponse(
+            OrganizationId: Guid.NewGuid(),
+            Name: "Super Awesome Games",
+            BusinessType: "Game Studio",
+            Industry: "Video Games",
+            Description: null,
+            Mission: "We make great web games",
+            LifecycleStage: "Validation",
+            TargetCustomers: ["casual browser players"],
+            Offerings: ["browser games"],
+            RevenueModel: null,
+            Jurisdictions: [],
+            OperatingStyle: null,
+            Constraints: ["Use approved providers"],
+            Tools: [],
+            RiskPreference: null,
+            TimeZone: "UTC",
+            Revision: 7,
+            Completeness: 0.8m,
+            Provenance: new Dictionary<string, ProfileFieldProvenance>());
+        var context = new ProductOperatingContext(business, null, null, null, null, null, []);
+
+        var prompt = ProductManagerAgent.BuildBoundedHiringPrompt(
+            "Make a Mario Kart clone PoC with no time or budget constraints.", context);
+
+        Assert.Contains("Mario Kart clone PoC", prompt, StringComparison.Ordinal);
+        Assert.Contains("casual browser players", prompt, StringComparison.Ordinal);
+        Assert.Contains("Context revision: 7", prompt, StringComparison.Ordinal);
+        Assert.DoesNotContain("organization snapshot", prompt, StringComparison.OrdinalIgnoreCase);
+        Assert.True(prompt.Length < 3_000, $"Bounded hiring prompt was {prompt.Length} characters.");
+    }
+
+    [Fact]
     public void ResponseNormalization_RemovesRepeatedProductDefinitionAndItsToolNarration()
     {
         var response = """
@@ -687,6 +893,21 @@ What level of prototype fidelity are we aiming for?
                     sentMessage = request;
                     return Task.FromResult(SentMessage(request));
                 })
+            .RegisterCapability<object, PersonalTodoDirectory>(
+                PersonalTodoCapabilities.Read,
+                (_, _) => Task.FromResult(new PersonalTodoDirectory([], productManagerId)))
+            .RegisterCapability<AddPersonalTodoItemRequest, PersonalTodoItem>(
+                PersonalTodoCapabilities.Add,
+                (request, _) => Task.FromResult(new PersonalTodoItem(
+                    Guid.NewGuid(), Guid.NewGuid(), productManagerId, productManagerId,
+                    ProductManagerProfile.DefaultDisplayName, request.Title,
+                    request.Description ?? string.Empty, PersonalTodoStatuses.Ready,
+                    request.Priority, 1024, 1, null, request.SourceConversationId,
+                    request.SourceMessageId, [], null, null, DateTimeOffset.UtcNow,
+                    DateTimeOffset.UtcNow)
+                {
+                    CorrelationId = request.CorrelationId
+                }))
             .RegisterCapability<CompleteAgentOnboardingRequest, JsonElement>(
                 AgentLifecycleCapabilities.CompleteOnboarding,
                 (request, _) =>

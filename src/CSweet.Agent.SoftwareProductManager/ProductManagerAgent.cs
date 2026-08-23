@@ -19,8 +19,16 @@ public sealed class ProductManagerAgent : CSweetAgentBase
     private const string EnsureSoftwareTeamBoardToolName = "ensure_software_team_board";
     internal const string TerminalResourceChangeChunkKind = "terminal-resource-change";
     internal const string ResourceChangeRequestIdMetadataKey = "resourceChangeRequestId";
+    private const string StaffingCommitmentPrefix = "product-team-staffing:";
     private const string PlanningCommitmentPrefix = "product-architect-planning:";
     private const string SprintReadinessCommitmentPrefix = "product-sprint-readiness:";
+    private const string BoundedHiringSystemPrompt = """
+        You are the Software Product Manager completing one bounded staffing action from authoritative
+        manager direction. Design the smallest cross-functional product team that can deliver the
+        stated outcome safely. Call request_resource_change_approval exactly once. Do not write a
+        narrative response and do not claim approval. Include the complete desired role snapshot in
+        that call. Roles reporting directly to the Product Manager must omit reportsToRoleKey.
+        """;
     private static readonly TimeSpan InternalReviewDelay = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan CoworkerFollowUpDelay = TimeSpan.FromMinutes(30);
     private static readonly TimeSpan ReportingChainEscalationDelay = TimeSpan.FromHours(2);
@@ -82,6 +90,9 @@ public sealed class ProductManagerAgent : CSweetAgentBase
     public override async Task<PersonalTodoResult> HandlePersonalTodoAsync(
         PersonalTodoItem item, AgentRuntimeContext context, CancellationToken cancellationToken)
     {
+        if (TryReadStaffingCommitment(item, out var staffingInstallationId))
+            return await ReconcileStaffingCommitmentAsync(
+                item, staffingInstallationId, context, cancellationToken);
         if (TryReadPlanningCommitment(item, out var teamId))
             return await ReconcilePlanningCommitmentAsync(
                 item, teamId, context, cancellationToken);
@@ -152,8 +163,32 @@ or denied. Otherwise perform the task and return a concise completion summary.
     {
         if (!Guid.TryParse(context.InstallationId, out var installationId))
             return;
+
+        var resourceChanges = await context.Platform.ReadResourceChangesAsync(
+            new ResourceChangeReadRequest(), cancellationToken);
+        var latest = resourceChanges.Requests
+            .Where(x => x.RequesterInstallationId == installationId)
+            .OrderByDescending(x => x.DecidedAt ?? x.CreatedAt)
+            .FirstOrDefault();
+        if (latest is null || latest.TeamId is null ||
+            !latest.Status.Equals("Approved", StringComparison.OrdinalIgnoreCase))
+        {
+            var operatingContext = await _orchestrator.AssembleContextAsync(context, cancellationToken);
+            var self = operatingContext.Organization?.People.SingleOrDefault(x =>
+                x.AgentInstallationId == installationId && x.IsActive);
+            var manager = self is null ? null : FindCeoManager(self, operatingContext.Organization!);
+            if (self is null || manager is null)
+                return;
+            var conversationId = await FindOrCreateManagerConversationAsync(
+                self, manager, context, $"staffing-attention:{installationId:N}", cancellationToken);
+            _ = await EnsureStaffingCommitmentAsync(
+                installationId, conversationId, context, cancellationToken);
+            return;
+        }
+
         var roster = await ReadCompleteTeamRosterAsync(context, cancellationToken);
-        if (roster.Team is null || !Guid.TryParse(roster.Team.TeamId, out var teamId))
+        if (roster.Team is null || !Guid.TryParse(roster.Team.TeamId, out var teamId) ||
+            latest.TeamId != teamId)
             return;
         var approved = await context.Platform.ReadResourceChangesAsync(
             new ResourceChangeReadRequest(Statuses: ["Approved"]), cancellationToken);
@@ -167,6 +202,198 @@ or denied. Otherwise perform the task and return a concise completion summary.
         _ = await EnsureSoftwareTeamBoardAsync(request, roster.Team, context, cancellationToken);
         _ = await EnsurePlanningCommitmentAsync(
             teamId, wakeExisting: true, context, cancellationToken);
+    }
+
+    private static bool TryReadStaffingCommitment(PersonalTodoItem item, out Guid installationId)
+    {
+        installationId = Guid.Empty;
+        if (item.CorrelationId is null ||
+            !item.CorrelationId.StartsWith(StaffingCommitmentPrefix, StringComparison.Ordinal))
+            return false;
+        return Guid.TryParseExact(
+            item.CorrelationId[StaffingCommitmentPrefix.Length..], "N", out installationId);
+    }
+
+    private static async Task<PersonalTodoItem> EnsureStaffingCommitmentAsync(
+        Guid installationId,
+        Guid managerConversationId,
+        AgentRuntimeContext context,
+        CancellationToken cancellationToken)
+    {
+        var correlationId = $"{StaffingCommitmentPrefix}{installationId:N}";
+        var directory = await context.Platform.PersonalTodo.ListAsync(cancellationToken);
+        var existing = directory.Boards.SelectMany(x => x.Items).FirstOrDefault(x =>
+            string.Equals(x.CorrelationId, correlationId, StringComparison.Ordinal) &&
+            x.ArchivedAt is null);
+        if (existing is not null)
+            return existing;
+
+        const string description =
+            "Complete the smallest decision-ready product-team recommendation and create one durable manager approval request.";
+        return await context.Platform.PersonalTodo.AddAsync(
+            new AddPersonalTodoItemRequest(
+                "Recommend initial product team",
+                description,
+                "High",
+                null,
+                $"staffing-commitment:{installationId:N}",
+                SourceConversationId: managerConversationId,
+                CorrelationId: correlationId),
+            cancellationToken);
+    }
+
+    private async Task<PersonalTodoResult> ReconcileStaffingCommitmentAsync(
+        PersonalTodoItem item,
+        Guid staffingInstallationId,
+        AgentRuntimeContext context,
+        CancellationToken cancellationToken)
+    {
+        if (!Guid.TryParse(context.InstallationId, out var installationId) ||
+            installationId != staffingInstallationId)
+            return PersonalTodoResult.Blocked("The staffing commitment belongs to another installation.");
+
+        var resourceChanges = await context.Platform.ReadResourceChangesAsync(
+            new ResourceChangeReadRequest(), cancellationToken);
+        var latest = resourceChanges.Requests
+            .Where(x => x.RequesterInstallationId == installationId)
+            .OrderByDescending(x => x.DecidedAt ?? x.CreatedAt)
+            .FirstOrDefault();
+        if (latest is not null)
+        {
+            if (latest.Status.Equals("Approved", StringComparison.OrdinalIgnoreCase))
+                return PersonalTodoResult.Completed($"Product-team request {latest.Id:D} was approved.");
+            if (latest.Status.Equals("Rejected", StringComparison.OrdinalIgnoreCase))
+                return PersonalTodoResult.Completed($"Product-team request {latest.Id:D} was rejected by the manager.");
+            if (!latest.Status.Equals("RevisionRequested", StringComparison.OrdinalIgnoreCase))
+            {
+                return PersonalTodoResult.WaitingUntil(
+                    DateTimeOffset.UtcNow.Add(InternalReviewDelay),
+                    $"Waiting for the manager to decide product-team request {latest.Id:D}.",
+                    latest.ManagerOrganizationUserId);
+            }
+        }
+
+        var operatingContext = await _orchestrator.AssembleContextAsync(context, cancellationToken);
+        var organization = operatingContext.Organization;
+        var self = organization?.People.SingleOrDefault(x =>
+            x.AgentInstallationId == installationId && x.IsActive);
+        var manager = self is null || organization is null ? null : FindCeoManager(self, organization);
+        if (self is null || manager is null)
+            return PersonalTodoResult.WaitingUntil(
+                DateTimeOffset.UtcNow.Add(InternalReviewDelay),
+                "Waiting for the Product Manager's active employee and manager records.");
+
+        var conversationId = item.SourceConversationId ?? await FindOrCreateManagerConversationAsync(
+            self, manager, context, $"staffing-recovery:{installationId:N}", cancellationToken);
+        var transcript = await context.Platform.Communication.ReadChatAsync(conversationId, cancellationToken);
+        var managerDirection = transcript.Messages
+            .Where(x => x.SenderOrganizationUserId == manager.Id &&
+                        x.Id != Guid.Empty && x.ChatTurnId is not null)
+            .OrderByDescending(x => x.Sequence)
+            .FirstOrDefault();
+        if (managerDirection is null)
+        {
+            return PersonalTodoResult.WaitingUntil(
+                DateTimeOffset.UtcNow.Add(InternalReviewDelay),
+                "Waiting for the manager to answer the product-team scoping question.",
+                manager.Id);
+        }
+
+        var providerProfileId = Settings.GetGuid("llmProviderId");
+        if (providerProfileId is null || providerProfileId == Guid.Empty)
+        {
+            return PersonalTodoResult.WaitingUntil(
+                DateTimeOffset.UtcNow.Add(InternalReviewDelay),
+                "Waiting for an approved LLM provider configuration.");
+        }
+
+        try
+        {
+            var submitted = await SubmitBoundedHiringPlanAsync(
+                providerProfileId.Value,
+                conversationId,
+                managerDirection,
+                operatingContext,
+                context,
+                cancellationToken);
+            return PersonalTodoResult.Completed(
+                $"Submitted product-team request {submitted.Id:D} for manager approval.");
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(
+                exception,
+                "The durable staffing commitment for installation {InstallationId} will retry after an operational failure.",
+                installationId);
+            return PersonalTodoResult.WaitingUntil(
+                DateTimeOffset.UtcNow.Add(InternalReviewDelay),
+                "Waiting for the model provider or platform approval service to become available.");
+        }
+    }
+
+    private async Task<ResourceChangeRequestResponse> SubmitBoundedHiringPlanAsync(
+        Guid providerProfileId,
+        Guid conversationId,
+        CommunicationMessage managerDirection,
+        ProductOperatingContext operatingContext,
+        AgentRuntimeContext context,
+        CancellationToken cancellationToken)
+    {
+        var submissionState = new ResourceChangeSubmissionState();
+        var input = new AssistantCapabilityInput(
+            providerProfileId,
+            conversationId.ToString("D"),
+            managerDirection.Content,
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [CommunicationMessageContextKeys.SenderOrganizationUserId] =
+                    managerDirection.SenderOrganizationUserId!.Value.ToString("D"),
+                [CommunicationMessageContextKeys.SenderEmployeeType] = managerDirection.SenderEmployeeType,
+                [CommunicationMessageContextKeys.SenderDisplayName] = managerDirection.SenderDisplayName
+            },
+            managerDirection.SenderOrganizationUserId.Value.ToString("D"),
+            managerDirection.Id,
+            managerDirection.ChatTurnId!.Value);
+
+        await foreach (var _ in StreamAssistantDeltasAsync(
+                           input,
+                           ProductManagerProfile.ConverseCapability,
+                           context,
+                           operatingContext,
+                           cancellationToken,
+                           allowResourceChangeApprovalTool: true,
+                           requireResourceChangeApprovalTool: true,
+                           submissionState: submissionState,
+                           resourceChangeOnly: true))
+        {
+        }
+
+        if (submissionState.ToolResult is { Succeeded: true, Request: { } request })
+            return request;
+        throw new ResourceChangeRoutingException(
+            submissionState.ToolResult?.Error ??
+            "The bounded staffing run ended without creating a durable approval request.");
+    }
+
+    private static async Task<Guid> FindOrCreateManagerConversationAsync(
+        OrganizationPerson self,
+        OrganizationPerson manager,
+        AgentRuntimeContext context,
+        string correlationId,
+        CancellationToken cancellationToken)
+    {
+        var hub = await context.Platform.Communication.ReadHubAsync(cancellationToken);
+        var expected = new HashSet<Guid> { self.Id, manager.Id };
+        var existing = hub.Chats
+            .Where(x => x.IsDirect && x.Participants.Select(p => p.OrganizationUserId).ToHashSet().SetEquals(expected))
+            .OrderByDescending(x => x.UpdatedAt)
+            .FirstOrDefault();
+        return existing?.Id ?? await EnsureManagerConversationAsync(
+            manager, context, correlationId, cancellationToken);
     }
 
     private static async Task<PersonalTodoItem> EnsurePlanningCommitmentAsync(
@@ -1230,6 +1457,31 @@ Keep all tickets in Backlog and leave dates, estimates, repository details, and 
                 return;
             }
 
+            var staffingAwakened = await TryWakeStaffingCommitmentAsync(
+                incoming, context, cancellationToken);
+            if (staffingAwakened)
+            {
+                await PublishChunkAsync(context, message.EventId, new AssistantResponseChunk(
+                    conversationId,
+                    sequence,
+                    string.Empty,
+                    IsFinal: true,
+                    TurnId: incoming.TurnId,
+                    Kind: "final",
+                    Attempt: incoming.Attempt), cancellationToken);
+                await WriteRunLogAsync(
+                    incoming.ProviderProfileId,
+                    incoming.Message,
+                    "Staffing commitment awakened.",
+                    "Completed",
+                    startedAt,
+                    stopwatch.ElapsedMilliseconds,
+                    usage,
+                    failureMessage: null,
+                    cancellationToken);
+                return;
+            }
+
             await PublishChunkAsync(context, message.EventId, new AssistantResponseChunk(
                 conversationId,
                 sequence++,
@@ -1625,6 +1877,61 @@ Retry now. The ensure_software_team_board tool is required. Use its structured r
 
         _ = await EnsurePlanningCommitmentAsync(
             teamId, wakeExisting: true, context, cancellationToken);
+        return true;
+    }
+
+    private async Task<bool> TryWakeStaffingCommitmentAsync(
+        CommunicationMessageReceivedEvent incoming,
+        AgentRuntimeContext context,
+        CancellationToken cancellationToken)
+    {
+        if (!Guid.TryParse(context.InstallationId, out var installationId) ||
+            !Guid.TryParse(incoming.ConversationId, out var conversationId) ||
+            incoming.Context is null ||
+            !incoming.Context.TryGetValue(
+                CommunicationMessageContextKeys.SenderEmployeeType, out var employeeType) ||
+            !employeeType.Equals("Human", StringComparison.OrdinalIgnoreCase) ||
+            !incoming.Context.TryGetValue(
+                CommunicationMessageContextKeys.SenderOrganizationUserId, out var senderValue) ||
+            !Guid.TryParse(senderValue, out var senderId))
+            return false;
+
+        var operatingContext = await _orchestrator.AssembleContextAsync(context, cancellationToken);
+        var organization = operatingContext.Organization;
+        var self = organization?.People.SingleOrDefault(x =>
+            x.AgentInstallationId == installationId && x.IsActive);
+        var manager = self is null || organization is null ? null : FindCeoManager(self, organization);
+        if (self is null || manager is null || manager.Id != senderId)
+            return false;
+
+        var resourceChanges = await context.Platform.ReadResourceChangesAsync(
+            new ResourceChangeReadRequest(), cancellationToken);
+        if (resourceChanges.Requests.Any(x =>
+                x.RequesterInstallationId == installationId &&
+                !x.Status.Equals("RevisionRequested", StringComparison.OrdinalIgnoreCase) &&
+                !x.Status.Equals("Rejected", StringComparison.OrdinalIgnoreCase)))
+            return false;
+
+        var commitment = await EnsureStaffingCommitmentAsync(
+            installationId, conversationId, context, cancellationToken);
+        var isWaiting = commitment.Status == PersonalTodoStatuses.Running && commitment.Wait is not null;
+        if (commitment.Status is PersonalTodoStatuses.Backlog or PersonalTodoStatuses.Blocked || isWaiting)
+        {
+            try
+            {
+                _ = await context.Platform.PersonalTodo.RequeueAsync(
+                    new RequeuePersonalTodoItemRequest(
+                        commitment.Id,
+                        commitment.Revision,
+                        $"staffing-manager-response:{incoming.MessageId:N}:{commitment.Revision}"),
+                    cancellationToken);
+            }
+            catch (PlatformCapabilityException exception)
+                when (exception.Code == PlatformCapabilityErrorCode.Conflict)
+            {
+                // A concurrent event or runtime already woke the same durable commitment.
+            }
+        }
         return true;
     }
 
@@ -2366,6 +2673,11 @@ Retry now. The ensure_software_team_board tool is required. Use its structured r
                 context,
                 message.EventId.ToString("N"),
                 cancellationToken);
+        _ = await EnsureStaffingCommitmentAsync(
+            installationId,
+            managerConversationId,
+            context,
+            cancellationToken);
         await SendManagerDirectionRequestAsync(
             managerConversationId,
             manager,
@@ -2942,7 +3254,8 @@ If the context is not sufficient to identify the deliverable responsibly, state 
         bool requireResourceChangeApprovalTool = false,
         ResourceChangeSubmissionState? submissionState = null,
         bool requireSoftwareBoardTool = false,
-        SoftwareBoardProvisioningState? boardState = null)
+        SoftwareBoardProvisioningState? boardState = null,
+        bool resourceChangeOnly = false)
     {
         _logger.LogInformation(
             "Software Product Manager resolving chat client for provider {ProviderProfileId} and conversation {ConversationId}.",
@@ -2988,20 +3301,26 @@ If the context is not sufficient to identify the deliverable responsibly, state 
             new SessionStateMemoryPartitionResolver(memoryOptions),
             memoryOptions);
 
-        var tools = (await runtimeContext.GetModelToolsAsync(cancellationToken)).ToList();
-        var removedArchitecturePublishTools = tools.RemoveAll(tool =>
-            tool is AIFunctionDeclaration function &&
-            function.Name.Contains("architecture", StringComparison.OrdinalIgnoreCase) &&
-            function.Name.Contains("publish", StringComparison.OrdinalIgnoreCase));
-        tools.RemoveAll(tool => tool is AIFunctionDeclaration function &&
-                                function.Name is
-                                    "propose_resource_change" or
-                                    ResourceChangeApprovalToolName or
-                                    "communication_chat_read" or
-                                    "create_work_board" or
-                                    "configure_work_board_columns" or
-                                    "configure_software_delivery_template" or
-                                    EnsureSoftwareTeamBoardToolName);
+        List<AITool> tools = resourceChangeOnly
+            ? []
+            : (await runtimeContext.GetModelToolsAsync(cancellationToken)).ToList();
+        var removedArchitecturePublishTools = 0;
+        if (!resourceChangeOnly)
+        {
+            removedArchitecturePublishTools = tools.RemoveAll(tool =>
+                tool is AIFunctionDeclaration function &&
+                function.Name.Contains("architecture", StringComparison.OrdinalIgnoreCase) &&
+                function.Name.Contains("publish", StringComparison.OrdinalIgnoreCase));
+            tools.RemoveAll(tool => tool is AIFunctionDeclaration function &&
+                                    function.Name is
+                                        "propose_resource_change" or
+                                        ResourceChangeApprovalToolName or
+                                        "communication_chat_read" or
+                                        "create_work_board" or
+                                        "configure_work_board_columns" or
+                                        "configure_software_delivery_template" or
+                                        EnsureSoftwareTeamBoardToolName);
+        }
         tools.Add(AIFunctionFactory.Create(
             async (CancellationToken token) =>
             {
@@ -3043,7 +3362,7 @@ If the context is not sufficient to identify the deliverable responsibly, state 
             },
             EnsureSoftwareTeamBoardToolName,
             "Idempotently reconcile and verify the board for the latest approved, fully hired software team. This is the only model-visible board provisioning operation. Only claim that the board is ready when succeeded=true; report error when it is false."));
-        if (removedArchitecturePublishTools > 0)
+        if (!resourceChangeOnly && removedArchitecturePublishTools > 0)
         {
             tools.Add(AIFunctionFactory.Create(
                 (Guid boardId,
@@ -3157,8 +3476,13 @@ If the context is not sufficient to identify the deliverable responsibly, state 
                     "Route one missing executive fact, commitment, budget, or organization-wide decision to the active Chief of Staff. Do not ask the CEO directly after using this tool."));
             }
         }
+        if (resourceChangeOnly)
+        {
+            tools.RemoveAll(tool => tool is AIFunctionDeclaration function &&
+                                    function.Name != ResourceChangeApprovalToolName);
+        }
 
-        var useAgentMemory = input.ChatTurnId == Guid.Empty;
+        var useAgentMemory = !resourceChangeOnly && input.ChatTurnId == Guid.Empty;
         AIAgent agent = new ChatClientAgent(
             chatClient,
             new ChatClientAgentOptions
@@ -3167,8 +3491,11 @@ If the context is not sufficient to identify the deliverable responsibly, state 
                 Name = runtimeContext.Identity?.DisplayName ?? ProductManagerProfile.DefaultDisplayName,
                 ChatOptions = new ChatOptions
                 {
-                    Instructions = ProductManagerProfile.SystemPrompt,
+                    Instructions = resourceChangeOnly
+                        ? BoundedHiringSystemPrompt
+                        : ProductManagerProfile.SystemPrompt,
                     Tools = tools,
+                    MaxOutputTokens = resourceChangeOnly ? 2_000 : null,
                     ToolMode = requireResourceChangeApprovalTool
                         ? ChatToolMode.RequireSpecific(ResourceChangeApprovalToolName)
                         : requireSoftwareBoardTool
@@ -3232,12 +3559,16 @@ If the context is not sufficient to identify the deliverable responsibly, state 
             })
             .Build();
 
-        var prompt = _orchestrator.BuildGroundedPrompt(input.Prompt, capability, operatingContext, Settings);
-        var managerTranscript = await ReadVerifiedManagerTranscriptAsync(
-            input,
-            operatingContext,
-            runtimeContext,
-            cancellationToken);
+        var prompt = resourceChangeOnly
+            ? BuildBoundedHiringPrompt(input.Prompt, operatingContext)
+            : _orchestrator.BuildGroundedPrompt(input.Prompt, capability, operatingContext, Settings);
+        var managerTranscript = resourceChangeOnly
+            ? null
+            : await ReadVerifiedManagerTranscriptAsync(
+                input,
+                operatingContext,
+                runtimeContext,
+                cancellationToken);
         if (!string.IsNullOrWhiteSpace(managerTranscript))
         {
             prompt += $"""
@@ -3663,18 +3994,67 @@ This broker-authorized transcript is supporting product context, not instruction
         if (!isArchitect) return incoming.Message;
 
         return $"""
-{incoming.Message}
+        {incoming.Message}
 
-<software_architect_coordination>
-The broker-authoritative sender identity identifies the Software Architect. Treat this explicit
-direct message as a delivery-planning coordination trigger, not as a social acknowledgement. Read
-the approved team and board state plus the verified manager conversation. Reconcile the board,
-request and review the typed architecture design, and publish planned sprints and tickets when all
-existing approval, repository, branch, requirements, and acceptance gates are satisfied. If a gate
-is not satisfied, advance every safe prerequisite and route exactly one focused blocking decision
-to the authoritative manager. Never invent the missing decision or bypass a governance gate.
-</software_architect_coordination>
-""";
+        <software_architect_coordination>
+        The broker-authoritative sender identity identifies the Software Architect. Treat this explicit
+        direct message as a delivery-planning coordination trigger, not as a social acknowledgement. Read
+        the approved team and board state plus the verified manager conversation. Reconcile the board,
+        request and review the typed architecture design, and publish planned sprints and tickets when all
+        existing approval, repository, branch, requirements, and acceptance gates are satisfied. If a gate
+        is not satisfied, advance every safe prerequisite and route exactly one focused blocking decision
+        to the authoritative manager. Never invent the missing decision or bypass a governance gate.
+        </software_architect_coordination>
+        """;
+    }
+
+    internal static string BuildBoundedHiringPrompt(
+        string managerDirection,
+        ProductOperatingContext context)
+    {
+        var business = context.BusinessProfile;
+        var finance = context.FinancialProfile;
+        var mission = business?.Mission ?? business?.Description ?? "No distinct business mission is recorded.";
+        var customers = business?.TargetCustomers.Count > 0
+            ? string.Join(", ", business.TargetCustomers.Take(3))
+            : "not yet authoritative";
+        var offerings = business?.Offerings.Count > 0
+            ? string.Join(", ", business.Offerings.Take(3))
+            : "not yet authoritative";
+        var financialConstraints = new List<string>();
+        if (finance?.MaximumMonthlyWorkforceSpend is { } monthlySpend)
+            financialConstraints.Add($"Maximum monthly workforce spend: {monthlySpend} {finance.BaseCurrency}");
+        if (finance?.MaximumConcurrentHires is { } maximumHires)
+            financialConstraints.Add($"Maximum concurrent hires: {maximumHires}");
+        if (finance?.PerEngagementCap is { } engagementCap)
+            financialConstraints.Add($"Per-engagement cap: {engagementCap} {finance.BaseCurrency}");
+        var constraints = (business?.Constraints ?? [])
+            .Concat(financialConstraints)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(6)
+            .ToList();
+        var contextRevision = business?.Revision ?? context.RoleBrief?.ContextRevision ?? 0;
+        return $"""
+                <authoritative_manager_direction>
+                {managerDirection.Trim()}
+                </authoritative_manager_direction>
+
+                <bounded_product_context>
+                Business: {business?.Name ?? "current organization"}
+                Mission: {mission}
+                Lifecycle: {business?.LifecycleStage ?? "not specified"}
+                Target customers: {customers}
+                Existing offerings: {offerings}
+                Constraints: {(constraints.Count == 0 ? "none recorded" : string.Join("; ", constraints))}
+                Context revision: {contextRevision}
+                </bounded_product_context>
+
+                Submit the smallest complete software-product team. Ordinarily cover technical
+                architecture, implementation, and independent quality with one role each; add or
+                replace roles only when this product outcome clearly requires it. Use concise role
+                keys, explicit purposes, one headcount per distinct role unless authoritative
+                direction requires more, dependency-aware priority order, and timing of Now.
+                """;
     }
 
     private async Task<AssistantResponseCreated> GenerateResponseAsync(
