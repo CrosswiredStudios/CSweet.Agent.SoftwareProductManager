@@ -624,7 +624,7 @@ What level of prototype fidelity are we aiming for?
     }
 
     [Fact]
-    public async Task ArchitectReadinessAndAttention_ImmediatelyWakePersistedWaitingCommitmentExactlyOnce()
+    public async Task ArchitectReadinessAndAttention_ImmediatelyStartsGovernedPlanningExactlyOnce()
     {
         var organizationId = Guid.NewGuid();
         var teamId = Guid.NewGuid();
@@ -637,6 +637,8 @@ What level of prototype fidelity are we aiming for?
         var chatId = Guid.NewGuid();
         var readinessTurnId = Guid.NewGuid();
         var readinessMessageId = Guid.NewGuid();
+        var kickoffTurnId = Guid.NewGuid();
+        var kickoffMessageId = Guid.NewGuid();
         var boardId = Guid.NewGuid();
         var personalBoardId = Guid.NewGuid();
         var role = Role("architecture", "Software Architect", 1, "Now") with
@@ -805,7 +807,11 @@ What level of prototype fidelity are we aiming for?
                 (request, _) =>
                 {
                     sentMessages.Add(request);
-                    return Task.FromResult(SentMessage(request));
+                    return Task.FromResult(SentMessage(request) with
+                    {
+                        Id = kickoffMessageId,
+                        ChatTurnId = kickoffTurnId
+                    });
                 });
         var context = runtime.CreateContext(
             organizationId.ToString("D"), productManagerInstallationId.ToString("D"));
@@ -849,11 +855,12 @@ What level of prototype fidelity are we aiming for?
         Assert.NotNull(firstResult);
         Assert.NotNull(replayResult);
         var start = Assert.Single(coordinationStarts);
-        Assert.Equal(readinessMessageId, start.SourceMessageId);
-        Assert.Equal(readinessTurnId, start.SourceChatTurnId);
+        Assert.Equal(kickoffMessageId, start.SourceMessageId);
+        Assert.Equal(kickoffTurnId, start.SourceChatTurnId);
         Assert.Equal($"product-architect-planning:{teamId:N}", start.IdempotencyKey);
-        Assert.Empty(sentMessages);
-        Assert.Contains("Welcome aboard", start.InitialMessage, StringComparison.Ordinal);
+        var kickoff = Assert.Single(sentMessages);
+        Assert.Equal($"planning-kickoff:{teamId:N}", kickoff.IdempotencyKey);
+        Assert.Contains("starting our governed", start.InitialMessage, StringComparison.OrdinalIgnoreCase);
         var acknowledgement = Assert.Single(runtime.Progress);
         Assert.Equal(AgentTurnStreamKinds.FinalCommit, acknowledgement.GetProperty("kind").GetString());
         Assert.Contains("resumed the planning commitment",

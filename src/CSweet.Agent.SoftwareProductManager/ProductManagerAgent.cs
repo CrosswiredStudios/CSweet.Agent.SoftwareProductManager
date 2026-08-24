@@ -859,60 +859,64 @@ or denied. Otherwise perform the task and return a concise completion summary.
             boardDetail.Board.Id, boardDetail.Board.Name, planKey, request.ProductGoal,
             requirements, acceptanceCriteria, context, cancellationToken);
 
-        var hub = await context.Platform.Communication.ReadHubAsync(cancellationToken);
-        var direct = hub.Chats.SingleOrDefault(x => x.IsDirect &&
-            x.Participants.Count == 2 &&
-            x.Participants.Any(p => p.OrganizationUserId == self.Id) &&
-            x.Participants.Any(p => p.OrganizationUserId == architect.Id));
-        if (direct is null)
-        {
-            _ = await context.Platform.Communication.SendDirectMessageAsync(
-                architect.Id,
-                "I’m ready to begin product and backlog planning. Please confirm when your onboarding is complete.",
-                $"planning-readiness-check:{teamId:N}",
-                cancellationToken);
-            return PersonalTodoResult.WaitingUntil(
-                DateTimeOffset.UtcNow.Add(CoworkerFollowUpDelay),
-                "Waiting for the Software Architect's onboarding readiness response.", architect.Id);
-        }
-
-        var messages = await context.Platform.Communication.ReadChatAsync(direct.Id, cancellationToken);
-        var readiness = messages.Messages
-            .Where(x => x.SenderOrganizationUserId == architect.Id && x.ChatTurnId.HasValue &&
-                IsArchitectReadinessMessage(x.Content))
-            .OrderBy(x => x.CreatedAt)
-            .FirstOrDefault();
-        var sessions = (await context.Platform.Communication.ListCoordinationAsync(
-                direct.Id, activeOnly: false, cancellationToken))
-            .Sessions
-            .Where(x => x.Initiator.OrganizationUserId == self.Id &&
-                x.Target.OrganizationUserId == architect.Id &&
-                x.SourceConversationId == direct.Id)
-            .OrderByDescending(x => x.UpdatedAt)
-            .ToList();
-
-        var session = sessions.FirstOrDefault();
-        if (session is null && readiness is null)
-        {
-            _ = await context.Platform.Communication.SendMessageAsync(
-                direct.Id,
-                "I’m ready to begin product and backlog planning. Please confirm when your onboarding is complete.",
-                $"planning-readiness-check:{teamId:N}", cancellationToken);
-            return PersonalTodoResult.WaitingUntil(
-                DateTimeOffset.UtcNow.Add(CoworkerFollowUpDelay),
-                "Waiting for the Software Architect's onboarding readiness response.", architect.Id);
-        }
-
-        if (session is null)
-        {
-            var acknowledgement = $"""
-Welcome aboard. I’ve confirmed your onboarding and started our {boardDetail.Board.Name} planning session.
+        var kickoff = $"""
+I’m starting our governed {boardDetail.Board.Name} planning session now.
 Outcome: {request.ProductGoal}
 I’ll own product scope, priorities, requirements, acceptance criteria, publication approval, and sprint
 activation. I created the outcome Epics in Backlog. Start by producing the complete technical design
 for exact-digest approval. After approval, propose sprint-grouped Stories and junior-ready Task pages.
 Keep all tickets in Backlog and leave dates, estimates, repository details, and assignments unset until authoritative.
 """;
+        var hub = await context.Platform.Communication.ReadHubAsync(cancellationToken);
+        var direct = hub.Chats.SingleOrDefault(x => x.IsDirect &&
+            x.Participants.Count == 2 &&
+            x.Participants.Any(p => p.OrganizationUserId == self.Id) &&
+            x.Participants.Any(p => p.OrganizationUserId == architect.Id));
+        Guid directId;
+        Guid? kickoffMessageId = null;
+        Guid? kickoffTurnId = null;
+        if (direct is null)
+        {
+            var dispatch = await context.Platform.Communication.SendDirectAgentMessageAsync(
+                architect.Id,
+                kickoff,
+                $"planning-kickoff:{teamId:N}",
+                cancellationToken);
+            directId = dispatch.ChatId;
+            kickoffMessageId = dispatch.MessageId;
+            kickoffTurnId = dispatch.RecipientChatTurnId;
+        }
+        else
+        {
+            directId = direct.Id;
+        }
+        var sessions = (await context.Platform.Communication.ListCoordinationAsync(
+                directId, activeOnly: false, cancellationToken))
+            .Sessions
+            .Where(x => x.Initiator.OrganizationUserId == self.Id &&
+                x.Target.OrganizationUserId == architect.Id &&
+                x.SourceConversationId == directId)
+            .OrderByDescending(x => x.UpdatedAt)
+            .ToList();
+
+        var session = sessions.FirstOrDefault();
+        if (session is null)
+        {
+            if (!kickoffMessageId.HasValue || !kickoffTurnId.HasValue)
+            {
+                var message = await context.Platform.Communication.SendMessageAsync(
+                    directId,
+                    kickoff,
+                    $"planning-kickoff:{teamId:N}",
+                    cancellationToken);
+                if (message.ChatTurnId is not { } targetTurnId || targetTurnId == Guid.Empty)
+                    return PersonalTodoResult.WaitingUntil(
+                        DateTimeOffset.UtcNow.Add(InternalReviewDelay),
+                        "The planning kickoff was persisted, but the Software Architect turn is not available yet.",
+                        architect.Id);
+                kickoffMessageId = message.Id;
+                kickoffTurnId = targetTurnId;
+            }
             session = await context.Platform.Communication.StartCoordinationAsync(
                 new StartAgentCoordinationRequest(
                     architect.Id,
@@ -923,10 +927,10 @@ Keep all tickets in Backlog and leave dates, estimates, repository details, and 
                         "Architecture supplies dependency order, risks, technical slices, and implementation sequencing.",
                         "An undated, unestimated, unassigned provisional backlog is published before delivery staffing."
                     ],
-                    acknowledgement,
-                    direct.Id,
-                    readiness!.ChatTurnId!.Value,
-                    readiness.Id,
+                    kickoff,
+                    directId,
+                    kickoffTurnId.Value,
+                    kickoffMessageId.Value,
                     $"{PlanningCommitmentPrefix}{teamId:N}",
                     CreateBriefArtifact(new IncrementalProductBrief(
                         boardDetail.Board.Id,
@@ -993,24 +997,24 @@ Keep all tickets in Backlog and leave dates, estimates, repository details, and 
                 "The provisional backlog cannot be delegated until product and architecture planning advances.",
                 new AssistantCapabilityInput(
                     Settings.GetGuid("llmProviderId") ?? Guid.Empty,
-                    direct.Id.ToString("D"),
+                    directId.ToString("D"),
                     "Durable planning escalation.",
                     null,
                     architect.Id.ToString("D"),
-                    readiness?.Id ?? item.Id,
-                    readiness?.ChatTurnId ?? Guid.Empty),
+                    session.SourceMessageId,
+                    session.SourceChatTurnId),
                 operatingContext,
                 context,
                 cancellationToken);
             _ = await context.Platform.Communication.SendMessageAsync(
-                direct.Id,
+                directId,
                 $"Planning remains blocked after two hours, so I escalated it through the reporting chain. {escalation.Message}",
                 $"planning-escalation-notice:{teamId:N}:{session.Id:N}", cancellationToken);
         }
         else if (architectOwesTurn && now - session.UpdatedAt >= CoworkerFollowUpDelay)
         {
             _ = await context.Platform.Communication.SendMessageAsync(
-                direct.Id,
+                directId,
                 "Quick follow-up on our planning session: please send the next focused question or decomposition update when ready.",
                 $"planning-follow-up:{teamId:N}:{session.Id:N}", cancellationToken);
         }
