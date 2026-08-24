@@ -909,8 +909,8 @@ or denied. Otherwise perform the task and return a concise completion summary.
 Welcome aboard. I’ve confirmed your onboarding and started our {boardDetail.Board.Name} planning session.
 Outcome: {request.ProductGoal}
 I’ll own product scope, priorities, requirements, acceptance criteria, publication approval, and sprint
-activation. I created the outcome Epics in Backlog. Start by proposing Stories and planned sprint
-groupings for {outcomeEpics[0].Epic.Title}; after approval, decompose one Story at a time into junior-ready Task pages.
+activation. I created the outcome Epics in Backlog. Start by producing the complete technical design
+for exact-digest approval. After approval, propose sprint-grouped Stories and junior-ready Task pages.
 Keep all tickets in Backlog and leave dates, estimates, repository details, and assignments unset until authoritative.
 """;
             session = await context.Platform.Communication.StartCoordinationAsync(
@@ -935,7 +935,13 @@ Keep all tickets in Backlog and leave dates, estimates, repository details, and 
                         requirements,
                         acceptanceCriteria,
                         outcomeEpics[0].Epic,
-                        "stories"))),
+                        "design")
+                    {
+                        SourceRevisions = new Dictionary<string, string>(StringComparer.Ordinal)
+                        {
+                            ["board"] = boardDetail.Board.Revision.ToString()
+                        }
+                    })),
                 cancellationToken);
         }
         else if ((session.Status == AgentCoordinationStatuses.Failed ||
@@ -1175,8 +1181,14 @@ Keep all tickets in Backlog and leave dates, estimates, repository details, and 
             .ToDictionary(x => x.Key, x => x.Count(), StringComparer.Ordinal);
         foreach (var task in tasks.OrderBy(x => x.Rank).ThenBy(x => x.Id))
         {
-            var developer = SelectLowestLoad(developers, loads)!;
-            var qa = SelectLowestLoad(quality.Where(x => x.Id != developer.Id).ToList(), loads);
+            var eligibleDevelopers = FilterByDelegationRecommendation(
+                developers, roster.Team, task.Planning!, "development");
+            var developer = SelectLowestLoad(eligibleDevelopers, loads);
+            if (developer is null)
+                return "No PM-approved Developer satisfies the Architect's required development capabilities.";
+            var eligibleQuality = FilterByDelegationRecommendation(
+                quality.Where(x => x.Id != developer.Id).ToList(), roster.Team, task.Planning!, "quality");
+            var qa = SelectLowestLoad(eligibleQuality, loads);
             if (qa is null)
                 return "Independent QA must be assigned to a principal other than the selected Developer.";
             var assignments = new[]
@@ -1257,6 +1269,24 @@ Keep all tickets in Backlog and leave dates, estimates, repository details, and 
         candidates.OrderBy(x => loads.GetValueOrDefault(PrincipalIdentity(x)))
             .ThenBy(x => x.Id)
             .FirstOrDefault();
+
+    private static IReadOnlyList<OrganizationPerson> FilterByDelegationRecommendation(
+        IReadOnlyList<OrganizationPerson> candidates,
+        AgentTeamContext team,
+        WorkItemPlanningSpecification planning,
+        string stageKey)
+    {
+        var recommendation = planning.DelegationRecommendations.FirstOrDefault(x =>
+            string.Equals(x.StageKey, stageKey, StringComparison.OrdinalIgnoreCase));
+        if (recommendation is null || recommendation.RequiredCapabilityKeys.Count == 0)
+            return candidates;
+        var capabilities = team.Members.Where(x => Guid.TryParse(x.EmployeeId, out _))
+            .ToDictionary(x => Guid.Parse(x.EmployeeId), x => x.EffectiveCapabilities);
+        return candidates.Where(candidate => capabilities.TryGetValue(candidate.Id, out var effective) &&
+                recommendation.RequiredCapabilityKeys.All(required =>
+                    effective.Contains(required, StringComparer.Ordinal)))
+            .ToList();
+    }
 
     private static string PrincipalIdentity(OrganizationPerson person) =>
         person.EmployeeType.Equals("Human", StringComparison.OrdinalIgnoreCase)
@@ -1416,7 +1446,8 @@ Keep all tickets in Backlog and leave dates, estimates, repository details, and 
                     story.AcceptanceCriteria,
                     proposal.Risks.Count == 0 ? ["No additional technical risk was identified in this Epic pass."] : proposal.Risks)
                 {
-                    DependencyItemIds = story.Dependencies.Select(key => itemIds[key]).ToArray()
+                    DependencyItemIds = story.Dependencies.Select(key => itemIds[key]).ToArray(),
+                    ArchitectureArtifactDigest = proposal.ApprovedDesignDigest
                 };
                 var item = await context.Platform.Work.CreateItemAsync(
                     new CreateWorkItemRequest(
@@ -1447,8 +1478,8 @@ Keep all tickets in Backlog and leave dates, estimates, repository details, and 
 
     private static AgentCoordinationArtifactSubmission CreateBriefArtifact(IncrementalProductBrief brief) =>
         new(
-            IncrementalPlanningArtifactTypes.ProductBrief,
-            "1.0",
+            IncrementalPlanningArtifactTypes.ArchitectureBrief,
+            "2.0",
             $"{brief.PlanKey}:{brief.Epic.Key}:{brief.Stage}:{brief.Story?.Key ?? "epic"}",
             brief.PageOrdinal,
             true,
@@ -1457,7 +1488,8 @@ Keep all tickets in Backlog and leave dates, estimates, repository details, and 
     private static IEnumerable<IncrementalStoryProposal> ReadStoryProposals(AgentCoordinationTurnRequest request) =>
         request.Transcript.Select(x => x.Artifact)
             .Where(x => x is not null &&
-                string.Equals(x.Type, IncrementalPlanningArtifactTypes.StoryProposal, StringComparison.Ordinal))
+                (string.Equals(x.Type, IncrementalPlanningArtifactTypes.StoryProposal, StringComparison.Ordinal) ||
+                 string.Equals(x.Type, IncrementalPlanningArtifactTypes.StoryProposalV2, StringComparison.Ordinal)))
             .Select(x => x!.Payload.Deserialize<IncrementalStoryProposal>(IncrementalJsonOptions))
             .Where(x => x is not null)
             .Select(x => x!);
@@ -1512,7 +1544,8 @@ Keep all tickets in Backlog and leave dates, estimates, repository details, and 
             .OrderBy(x => x.Ordinal)
             .Select(x => x.Artifact)
             .Where(x => x is not null &&
-                string.Equals(x.Type, IncrementalPlanningArtifactTypes.ProductBrief, StringComparison.Ordinal))
+                (string.Equals(x.Type, IncrementalPlanningArtifactTypes.ProductBrief, StringComparison.Ordinal) ||
+                 string.Equals(x.Type, IncrementalPlanningArtifactTypes.ArchitectureBrief, StringComparison.Ordinal)))
             .Select(x => x!.Payload.Deserialize<IncrementalProductBrief>(IncrementalJsonOptions))
             .FirstOrDefault(x => x is not null);
         var planKey = seedBrief?.PlanKey ?? $"coordination-{request.SessionId:N}";
@@ -1524,9 +1557,28 @@ Keep all tickets in Backlog and leave dates, estimates, repository details, and 
         var epics = await EnsureIncrementalOutcomeEpicsAsync(
             board.Id, board.Name, planKey, productGoal, requirements, acceptance,
             context, cancellationToken);
+        var approvedDecision = request.Transcript.OrderByDescending(x => x.Ordinal)
+            .Select(x => x.Artifact)
+            .Where(x => x?.Type == IncrementalPlanningArtifactTypes.ArchitectureDecision)
+            .Select(x => x!.Payload.Deserialize<ProductArchitectureDecision>(IncrementalJsonOptions))
+            .FirstOrDefault(x => x is not null &&
+                string.Equals(x.Decision, "approved", StringComparison.OrdinalIgnoreCase));
+        var approvedDesignDigest = approvedDecision?.DesignDigest;
 
         if (latest?.Artifact is not { } artifact)
         {
+            if (string.IsNullOrWhiteSpace(approvedDesignDigest))
+                return AgentCoordinationTurnResult.Continue(
+                    "I persisted the approved outcome Epics. Produce the complete technical design for exact-digest approval before Story planning.",
+                    CreateBriefArtifact(new IncrementalProductBrief(
+                        board.Id, planKey, productGoal, requirements, acceptance,
+                        epics[0].Epic, "design")
+                    {
+                        SourceRevisions = new Dictionary<string, string>(StringComparer.Ordinal)
+                        {
+                            ["board"] = board.Revision.ToString()
+                        }
+                    }));
             var proposedEpicKeys = ReadStoryProposals(request).Select(x => x.EpicKey)
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
             var nextEpic = epics.FirstOrDefault(x => !proposedEpicKeys.Contains(x.Epic.Key)) ?? epics[0];
@@ -1534,7 +1586,40 @@ Keep all tickets in Backlog and leave dates, estimates, repository details, and 
                 $"I persisted the outcome Epics. Propose the Stories and planned sprint grouping for {nextEpic.Epic.Title}.",
                 CreateBriefArtifact(new IncrementalProductBrief(
                     board.Id, planKey, productGoal, requirements, acceptance,
-                    nextEpic.Epic, "stories")));
+                    nextEpic.Epic, "stories")
+                {
+                    ApprovedDesignDigest = approvedDesignDigest,
+                    SourceRevisions = seedBrief?.SourceRevisions ?? new Dictionary<string, string>()
+                }));
+        }
+
+        if (string.Equals(artifact.Type, IncrementalPlanningArtifactTypes.DesignProposal, StringComparison.Ordinal))
+        {
+            var proposal = artifact.Payload.Deserialize<SoftwareArchitectureDesignProposal>(IncrementalJsonOptions)
+                ?? throw new InvalidOperationException("The architecture design proposal is empty.");
+            if (proposal.BoardId != board.Id || !string.Equals(proposal.PlanKey, planKey, StringComparison.Ordinal) ||
+                string.IsNullOrWhiteSpace(artifact.Digest))
+                throw new InvalidOperationException("The architecture design proposal does not match the approved product brief.");
+            var required = new[] { "components", "decisions", "qualityAttributes", "failureModes", "rollbackPlan", "requirementTraceability" };
+            var missing = proposal.Design.ValueKind != JsonValueKind.Object
+                ? required
+                : required.Where(name => !proposal.Design.TryGetProperty(name, out _)).ToArray();
+            var blocking = proposal.Design.ValueKind == JsonValueKind.Object &&
+                proposal.Design.TryGetProperty("blockingQuestions", out var questions) &&
+                questions.ValueKind == JsonValueKind.Array && questions.GetArrayLength() > 0;
+            var decision = missing.Length == 0 && !blocking ? "approved" : "revision_requested";
+            var rationale = decision == "approved"
+                ? $"The design is complete, traces the approved requirements, and its impact summary contains {proposal.ImpactSummary.Count} item(s)."
+                : $"Resolve missing or blocked design content: {string.Join(", ", missing)}{(blocking ? ", blockingQuestions" : string.Empty)}.";
+            return AgentCoordinationTurnResult.Continue(
+                decision == "approved"
+                    ? "I approved the exact technical design digest. Continue with design-bound Story proposals."
+                    : "I requested one bounded technical design revision; product scope and constraints are unchanged.",
+                new AgentCoordinationArtifactSubmission(
+                    IncrementalPlanningArtifactTypes.ArchitectureDecision, "1.0",
+                    $"{planKey}:design-decision", proposal.Revision, true,
+                    JsonSerializer.SerializeToElement(new ProductArchitectureDecision(
+                        planKey, artifact.Digest, decision, rationale, proposal.Revision), IncrementalJsonOptions)));
         }
 
         if (string.Equals(artifact.Type, IncrementalPlanningArtifactTypes.Question, StringComparison.Ordinal))
@@ -1544,10 +1629,14 @@ Keep all tickets in Backlog and leave dates, estimates, repository details, and 
                 $"Focused product question: {question?.Question ?? latest.Content}");
         }
 
-        if (string.Equals(artifact.Type, IncrementalPlanningArtifactTypes.StoryProposal, StringComparison.Ordinal))
+        if (string.Equals(artifact.Type, IncrementalPlanningArtifactTypes.StoryProposal, StringComparison.Ordinal) ||
+            string.Equals(artifact.Type, IncrementalPlanningArtifactTypes.StoryProposalV2, StringComparison.Ordinal))
         {
             var proposal = artifact.Payload.Deserialize<IncrementalStoryProposal>(IncrementalJsonOptions)
                 ?? throw new InvalidOperationException("The Story proposal artifact is empty.");
+            if (string.IsNullOrWhiteSpace(approvedDesignDigest) ||
+                !string.Equals(proposal.ApprovedDesignDigest, approvedDesignDigest, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("The Story proposal is not bound to the exact approved design digest.");
             var epic = epics.SingleOrDefault(x =>
                 string.Equals(x.Epic.Key, proposal.EpicKey, StringComparison.OrdinalIgnoreCase))
                 ?? throw new InvalidOperationException("The Story proposal does not belong to an approved Epic.");
@@ -1563,13 +1652,21 @@ Keep all tickets in Backlog and leave dates, estimates, repository details, and 
                 $"Decompose {nextStory.Title} into the first page of junior-ready Tasks.",
                 CreateBriefArtifact(new IncrementalProductBrief(
                     board.Id, planKey, productGoal, requirements, acceptance,
-                    epic.Epic, "tasks", nextStory, 0)));
+                    epic.Epic, "tasks", nextStory, 0)
+                {
+                    ApprovedDesignDigest = approvedDesignDigest,
+                    SourceRevisions = proposal.SourceRevisions
+                }));
         }
 
-        if (string.Equals(artifact.Type, IncrementalPlanningArtifactTypes.TaskProposal, StringComparison.Ordinal))
+        if (string.Equals(artifact.Type, IncrementalPlanningArtifactTypes.TaskProposal, StringComparison.Ordinal) ||
+            string.Equals(artifact.Type, IncrementalPlanningArtifactTypes.TaskProposalV2, StringComparison.Ordinal))
         {
             var proposal = artifact.Payload.Deserialize<IncrementalTaskProposal>(IncrementalJsonOptions)
                 ?? throw new InvalidOperationException("The Task proposal artifact is empty.");
+            if (string.IsNullOrWhiteSpace(approvedDesignDigest) ||
+                !string.Equals(proposal.ApprovedDesignDigest, approvedDesignDigest, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("The Task proposal is not bound to the exact approved design digest.");
             if (proposal.Tasks.Count is < 1 or > 8 || proposal.Tasks.Any(x =>
                     string.IsNullOrWhiteSpace(x.Key) || string.IsNullOrWhiteSpace(x.Title) ||
                     string.IsNullOrWhiteSpace(x.Purpose) || string.IsNullOrWhiteSpace(x.AffectedBoundary) ||
@@ -1605,11 +1702,17 @@ Keep all tickets in Backlog and leave dates, estimates, repository details, and 
                     $"I approved and published Task page {proposal.PageOrdinal + 1} for {source.Title}. Continue with the next page.",
                     CreateBriefArtifact(new IncrementalProductBrief(
                         board.Id, planKey, productGoal, requirements, acceptance,
-                        owningEpic.Epic, "tasks", source, proposal.PageOrdinal + 1)));
+                        owningEpic.Epic, "tasks", source, proposal.PageOrdinal + 1)
+                    {
+                        ApprovedDesignDigest = approvedDesignDigest,
+                        SourceRevisions = proposal.SourceRevisions
+                    }));
 
             var completedStoryKeys = request.Transcript
                 .Select(x => x.Artifact)
-                .Where(x => x is not null && x.Type == IncrementalPlanningArtifactTypes.TaskProposal && x.IsFinalPage)
+                .Where(x => x is not null &&
+                    (x.Type == IncrementalPlanningArtifactTypes.TaskProposal ||
+                     x.Type == IncrementalPlanningArtifactTypes.TaskProposalV2) && x.IsFinalPage)
                 .Select(x => x!.Payload.Deserialize<IncrementalTaskProposal>(IncrementalJsonOptions)?.StoryKey)
                 .Where(x => !string.IsNullOrWhiteSpace(x))
                 .Append(proposal.StoryKey)
@@ -1625,7 +1728,11 @@ Keep all tickets in Backlog and leave dates, estimates, repository details, and 
                     $"I approved and published the final Task page for {source.Title}. Next, decompose {nextStory.Title}.",
                     CreateBriefArtifact(new IncrementalProductBrief(
                         board.Id, planKey, productGoal, requirements, acceptance,
-                        storyEpic.Epic, "tasks", nextStory, 0)));
+                        storyEpic.Epic, "tasks", nextStory, 0)
+                    {
+                        ApprovedDesignDigest = approvedDesignDigest,
+                        SourceRevisions = proposal.SourceRevisions
+                    }));
             }
 
             var proposedEpicKeys = allStoryProposals.Select(x => x.EpicKey).ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -1635,7 +1742,11 @@ Keep all tickets in Backlog and leave dates, estimates, repository details, and 
                     $"All Stories in {owningEpic.Epic.Title} are decomposed. Propose Stories for {nextEpic.Epic.Title}.",
                     CreateBriefArtifact(new IncrementalProductBrief(
                         board.Id, planKey, productGoal, requirements, acceptance,
-                        nextEpic.Epic, "stories")));
+                        nextEpic.Epic, "stories")
+                    {
+                        ApprovedDesignDigest = approvedDesignDigest,
+                        SourceRevisions = proposal.SourceRevisions
+                    }));
 
             var verification = await VerifyPublishedBacklogAsync(
                 board.Id, context, cancellationToken,
@@ -1981,18 +2092,13 @@ Keep all tickets in Backlog and leave dates, estimates, repository details, and 
                 incoming, context, cancellationToken);
             if (readinessHandled)
             {
-                await PublishChunkAsync(context, message.EventId, new AssistantResponseChunk(
-                    conversationId,
-                    sequence,
-                    string.Empty,
-                    IsFinal: true,
-                    TurnId: incoming.TurnId,
-                    Kind: "final",
-                    Attempt: incoming.Attempt), cancellationToken);
+                const string acknowledgement =
+                    "Thanks — I’ve resumed the planning commitment with the Software Architect. I’ll report the next material decision or completed planning outcome here.";
+                await turnStream.CommitAsync(acknowledgement, cancellationToken);
                 await WriteRunLogAsync(
                     incoming.ProviderProfileId,
                     incoming.Message,
-                    "Planning commitment awakened.",
+                    acknowledgement,
                     "Completed",
                     startedAt,
                     stopwatch.ElapsedMilliseconds,
@@ -2006,18 +2112,13 @@ Keep all tickets in Backlog and leave dates, estimates, repository details, and 
                 incoming, context, cancellationToken);
             if (staffingAwakened)
             {
-                await PublishChunkAsync(context, message.EventId, new AssistantResponseChunk(
-                    conversationId,
-                    sequence,
-                    string.Empty,
-                    IsFinal: true,
-                    TurnId: incoming.TurnId,
-                    Kind: "final",
-                    Attempt: incoming.Attempt), cancellationToken);
+                const string acknowledgement =
+                    "Thanks — I’ve recorded that direction and resumed the product-team recommendation. I’ll send the decision-ready staffing plan for approval when it is ready.";
+                await turnStream.CommitAsync(acknowledgement, cancellationToken);
                 await WriteRunLogAsync(
                     incoming.ProviderProfileId,
                     incoming.Message,
-                    "Staffing commitment awakened.",
+                    acknowledgement,
                     "Completed",
                     startedAt,
                     stopwatch.ElapsedMilliseconds,

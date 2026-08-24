@@ -135,7 +135,7 @@ public sealed class ProductManagerProfileTests
             "src",
             "CSweet.Agent.SoftwareProductManager",
             "CSweet.Agent.SoftwareProductManager.csproj"));
-        Assert.Contains("CSweet.Agent.SDK\" Version=\"3.14.0", project, StringComparison.Ordinal);
+        Assert.Contains("CSweet.Agent.SDK\" Version=\"3.16.0", project, StringComparison.Ordinal);
         Assert.Contains("<ProjectReference", project, StringComparison.Ordinal);
         Assert.Contains($"<Version>{ProductManagerProfile.Version}</Version>", project, StringComparison.Ordinal);
     }
@@ -453,6 +453,11 @@ public sealed class ProductManagerProfileTests
         Assert.NotNull(requeued);
         Assert.Equal(commitment.Id, requeued.ItemId);
         Assert.Contains(messageId.ToString("N"), requeued.IdempotencyKey, StringComparison.Ordinal);
+        var acknowledgement = Assert.Single(runtime.Progress);
+        Assert.Equal(AgentTurnStreamKinds.FinalCommit, acknowledgement.GetProperty("kind").GetString());
+        Assert.True(acknowledgement.GetProperty("isFinal").GetBoolean());
+        Assert.Contains("resumed the product-team recommendation",
+            acknowledgement.GetProperty("delta").GetString(), StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -849,6 +854,10 @@ What level of prototype fidelity are we aiming for?
         Assert.Equal($"product-architect-planning:{teamId:N}", start.IdempotencyKey);
         Assert.Empty(sentMessages);
         Assert.Contains("Welcome aboard", start.InitialMessage, StringComparison.Ordinal);
+        var acknowledgement = Assert.Single(runtime.Progress);
+        Assert.Equal(AgentTurnStreamKinds.FinalCommit, acknowledgement.GetProperty("kind").GetString());
+        Assert.Contains("resumed the planning commitment",
+            acknowledgement.GetProperty("delta").GetString(), StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -1288,6 +1297,74 @@ Facts vs. inference: the pattern catalog says we should validate first. The stru
     }
 
     [Fact]
+    public async Task Coordination_ApprovesOnlyTheExactCompleteDesignDigest()
+    {
+        var productManagerId = Guid.NewGuid();
+        var architectId = Guid.NewGuid();
+        var boardId = Guid.NewGuid();
+        var columnId = Guid.NewGuid();
+        var sessionId = Guid.NewGuid();
+        var planKey = $"coordination-{sessionId:N}";
+        var board = new WorkBoardSummary(
+            boardId, "Product Delivery", "Approved board", false, false, 5, [])
+        { ManagerOrganizationUserId = productManagerId };
+        var epics = new[]
+        {
+            new WorkItem(Guid.NewGuid(), columnId, null, null, WorkItemKinds.Epic,
+                "[EPIC-01] Product Delivery", "Outcome", WorkStatuses.Backlog,
+                WorkPriorities.High, null, 1, 1, null),
+            new WorkItem(Guid.NewGuid(), columnId, null, null, WorkItemKinds.Epic,
+                "[EPIC-02] Product Delivery Validation", "Evidence", WorkStatuses.Backlog,
+                WorkPriorities.High, null, 2, 1, null)
+        };
+        var design = JsonSerializer.SerializeToElement(new
+        {
+            components = new[] { new { name = "Application" } },
+            decisions = new[] { new { title = "Boundary" } },
+            qualityAttributes = new[] { new { name = "Reliability" } },
+            failureModes = new[] { "Persistence unavailable" },
+            rollbackPlan = "Disable the reversible flag.",
+            requirementTraceability = new[] { new { requirement = "Ship" } },
+            blockingQuestions = Array.Empty<string>()
+        });
+        var proposal = new SoftwareArchitectureDesignProposal(
+            planKey, boardId, 0, design, ["One reversible boundary."],
+            new Dictionary<string, string> { ["board"] = board.Revision.ToString() });
+        var digest = new string('a', 64);
+        var artifact = new AgentCoordinationArtifact(
+            IncrementalPlanningArtifactTypes.DesignProposal, "1.0", $"{planKey}:design", 0, true,
+            JsonSerializer.SerializeToElement(proposal), digest);
+        var runtime = new AgentTestRuntime()
+            .RegisterCapability<WorkBoardListRequest, IReadOnlyList<WorkBoardSummary>>(
+                WorkBoardCapabilities.Read, (_, _) => Task.FromResult<IReadOnlyList<WorkBoardSummary>>([board]))
+            .RegisterCapability<WorkBoardReference, WorkBoardDetail>(
+                WorkItemCapabilities.Read, (_, _) => Task.FromResult(new WorkBoardDetail(
+                    board, [new WorkBoardColumn(columnId, "Backlog", "Backlog", 1, "Pull", null)], epics)));
+        var self = new AgentCoordinationParticipant(
+            productManagerId, Guid.NewGuid(), "Product Manager", "Software Product Manager");
+        var architect = new AgentCoordinationParticipant(
+            architectId, Guid.NewGuid(), "Architect", "Software Architect");
+        var request = new AgentCoordinationTurnRequest(
+            sessionId, 1, 1, "Product planning", "Ship", ["Release works"],
+            self, architect, false,
+            [new AgentCoordinationTurn(Guid.NewGuid(), 0, architectId,
+                AgentCoordinationDispositions.Continue, "Design attached.", DateTimeOffset.UtcNow, artifact)]);
+
+        var result = await new ProductManagerAgent(
+            NullLogger<ProductManagerAgent>.Instance,
+            new ProductManagerOrchestrator(NullLogger<ProductManagerOrchestrator>.Instance))
+            .HandleCoordinationTurnAsync(request, runtime.CreateContext(), CancellationToken.None);
+
+        Assert.Equal(AgentCoordinationDispositions.Continue, result.Disposition);
+        Assert.Equal(IncrementalPlanningArtifactTypes.ArchitectureDecision, result.Artifact!.Type);
+        var decision = result.Artifact.Payload.Deserialize<ProductArchitectureDecision>(
+            new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        Assert.NotNull(decision);
+        Assert.Equal("approved", decision!.Decision);
+        Assert.Equal(digest, decision.DesignDigest);
+    }
+
+    [Fact]
     public async Task Coordination_UsesV2ProviderAndCompletesAfterHierarchicalPublication()
     {
         var productManagerId = Guid.NewGuid();
@@ -1461,8 +1538,8 @@ Revert the isolated state module.
         Assert.Empty(designCalls);
         Assert.Empty(publishCalls);
         Assert.NotNull(result.Artifact);
-        Assert.Equal(IncrementalPlanningArtifactTypes.ProductBrief, result.Artifact!.Type);
-        Assert.Contains("persisted the outcome Epics", result.Content, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(IncrementalPlanningArtifactTypes.ArchitectureBrief, result.Artifact!.Type);
+        Assert.Contains("approved outcome Epics", result.Content, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
