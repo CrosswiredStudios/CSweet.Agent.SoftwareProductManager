@@ -1,7 +1,11 @@
 # C-Sweet Software Product Manager
 
-First-party Software Product Manager agent for C-Sweet, built on `CSweet.Agent.SDK` 3.13.0 and manifest protocol v2.
-The agent package version is `2.7.3`.
+First-party Software Product Manager agent for C-Sweet, built on `CSweet.Agent.SDK` 3.14.0 and manifest protocol v2.
+The agent package version is `2.8.0`.
+
+The configured-model lifecycle matrix is defined in
+[`evals/product-manager-lifecycle.v1.json`](evals/product-manager-lifecycle.v1.json) and must run
+against every supported configured model profile before release.
 
 It owns product outcomes, customer discovery, product strategy, prioritization, roadmaps, requirements, success measures, delivery alignment, and product-team design. It does not choose technical architecture, write production code, make legal conclusions, source candidates, hire workers, or spend money.
 
@@ -84,7 +88,7 @@ dotnet build CSweet.Agent.SoftwareProductManager.slnx
 dotnet test CSweet.Agent.SoftwareProductManager.slnx
 ```
 
-Requirements are .NET 10, `CSweet.Agent.SDK` 3.13.0, `CSweet.Memory`, an approved protocol-v2 installation, an active managing employee, and the grants in [GRANTS.md](GRANTS.md).
+Requirements are .NET 10, `CSweet.Agent.SDK` 3.14.0, `CSweet.Memory`, an approved protocol-v2 installation, an active managing employee, and the grants in [GRANTS.md](GRANTS.md).
 
 ## SDK 1.1.1 authoring contract
 

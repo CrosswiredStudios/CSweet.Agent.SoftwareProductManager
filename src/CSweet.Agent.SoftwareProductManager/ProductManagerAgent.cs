@@ -164,43 +164,398 @@ or denied. Otherwise perform the task and return a concise completion summary.
     {
         if (!Guid.TryParse(context.InstallationId, out var installationId))
             return;
-
+        var started = Stopwatch.StartNew();
+        var actions = new List<string>();
+        var conditions = new SortedSet<string>(StringComparer.Ordinal);
+        var roleHealth = new List<ProductManagerRoleHealth>();
+        var prior = await TryReadOperatingStateAsync(context, cancellationToken);
+        var openCommitments = await ReadOpenCommitmentCorrelationsAsync(context, cancellationToken);
+        var operatingContext = await _orchestrator.AssembleContextAsync(context, cancellationToken);
         var resourceChanges = await context.Platform.ReadResourceChangesAsync(
             new ResourceChangeReadRequest(), cancellationToken);
         var latest = resourceChanges.Requests
             .Where(x => x.RequesterInstallationId == installationId)
             .OrderByDescending(x => x.DecidedAt ?? x.CreatedAt)
             .FirstOrDefault();
+        TeamRosterResponse roster = new(null);
+        ResourceChangeRequestResponse? approvedPlan = null;
+
         if (latest is null || latest.TeamId is null ||
             !latest.Status.Equals("Approved", StringComparison.OrdinalIgnoreCase))
         {
-            var operatingContext = await _orchestrator.AssembleContextAsync(context, cancellationToken);
             var self = operatingContext.Organization?.People.SingleOrDefault(x =>
                 x.AgentInstallationId == installationId && x.IsActive);
             var manager = self is null ? null : FindCeoManager(self, operatingContext.Organization!);
-            if (self is null || manager is null)
-                return;
-            _ = await EnsureStaffingCommitmentAsync(
-                installationId, context, cancellationToken);
-            return;
+            conditions.Add(latest is null ? "team-design-required" : "awaiting-approval");
+            var staffingCorrelation = $"{StaffingCommitmentPrefix}{installationId:N}";
+            var needsStaffingCommitment = latest is null ||
+                latest.Status.Equals("RevisionRequested", StringComparison.OrdinalIgnoreCase);
+            if (self is not null && manager is not null && needsStaffingCommitment &&
+                !openCommitments.Contains(staffingCorrelation, StringComparer.Ordinal))
+            {
+                var commitment = await EnsureStaffingCommitmentAsync(
+                    installationId, context, cancellationToken);
+                actions.Add(commitment.CorrelationId ?? staffingCorrelation);
+            }
+        }
+        else
+        {
+            roster = await ReadCompleteTeamRosterAsync(context, cancellationToken);
+            if (roster.Team is null || !Guid.TryParse(roster.Team.TeamId, out var teamId) ||
+                latest.TeamId != teamId)
+            {
+                conditions.Add("team-membership-mismatch");
+            }
+            else
+            {
+                approvedPlan = resourceChanges.Requests
+                    .Where(x => x.TeamId == teamId && x.RequesterInstallationId == installationId &&
+                                x.Status.Equals("Approved", StringComparison.OrdinalIgnoreCase))
+                    .OrderByDescending(x => x.DecidedAt ?? x.CreatedAt)
+                    .FirstOrDefault();
+                if (approvedPlan is null)
+                {
+                    conditions.Add("awaiting-approval");
+                }
+                else
+                {
+                    roleHealth.AddRange(AssessApprovedRoles(
+                        approvedPlan, roster.Team, operatingContext.Organization));
+                    foreach (var role in roleHealth.Where(x => x.EffectiveHeadcount < x.DesiredHeadcount))
+                        conditions.Add(role.Evidence.Any(x => x.Contains("capability", StringComparison.OrdinalIgnoreCase))
+                            ? "capability-missing"
+                            : "role-missing");
+
+                    var architectReady = roleHealth.Any(x => x.Vital &&
+                        IsArchitectRole(x.RoleKey, x.RoleTitle) && x.EffectiveHeadcount >= x.DesiredHeadcount);
+                    if (!architectReady)
+                    {
+                        conditions.Add("planning-stalled");
+                    }
+
+                    var vitalGaps = roleHealth.Where(x => x.Vital && x.EffectiveHeadcount < x.DesiredHeadcount).ToList();
+                    StaffingReplenishmentResponse? existingReplacement = null;
+                    if (vitalGaps.Count > 0)
+                    {
+                        conditions.Add("delivery-unconfigured");
+                        existingReplacement = await TryReadExistingStaffingReplenishmentAsync(
+                            approvedPlan, vitalGaps, context, cancellationToken);
+                        if (existingReplacement?.Status.Equals(
+                                StaffingReplenishmentStatuses.Pending, StringComparison.OrdinalIgnoreCase) == true)
+                            conditions.Add("awaiting-approval");
+                    }
+                    var currentCharter = BuildCharter(operatingContext, approvedPlan);
+                    var currentFingerprint = ComputeAssessmentFingerprint(currentCharter, roleHealth, conditions);
+                    var unchanged = string.Equals(
+                        prior?.DecisionFingerprint, currentFingerprint, StringComparison.Ordinal);
+                    var planningCorrelation = $"{PlanningCommitmentPrefix}{teamId:N}";
+                    // A matching checkpoint means authoritative planning inputs are unchanged.
+                    // Completed commitments must stay completed instead of being recreated by
+                    // the next periodic attention tick.
+                    if (architectReady && !unchanged)
+                    {
+                        _ = await EnsureSoftwareTeamBoardAsync(approvedPlan, roster.Team, context, cancellationToken);
+                        var planning = await EnsurePlanningCommitmentAsync(
+                            teamId, wakeExisting: !unchanged, context, cancellationToken);
+                        actions.Add(planning.CorrelationId ?? planningCorrelation);
+                    }
+                    if (vitalGaps.Count > 0 && (existingReplacement is null || !unchanged))
+                    {
+                        var replacement = existingReplacement ?? await EnsureStaffingReplenishmentAsync(
+                            approvedPlan, vitalGaps, context, cancellationToken);
+                        if (replacement is not null)
+                        {
+                            actions.Add($"staffing-replenishment:{replacement.Id:N}");
+                            if (replacement.Status.Equals(StaffingReplenishmentStatuses.Pending, StringComparison.OrdinalIgnoreCase))
+                                conditions.Add("awaiting-approval");
+                        }
+                    }
+                }
+            }
         }
 
-        var roster = await ReadCompleteTeamRosterAsync(context, cancellationToken);
-        if (roster.Team is null || !Guid.TryParse(roster.Team.TeamId, out var teamId) ||
-            latest.TeamId != teamId)
-            return;
-        var approved = await context.Platform.ReadResourceChangesAsync(
-            new ResourceChangeReadRequest(Statuses: ["Approved"]), cancellationToken);
-        var request = approved.Requests
-            .Where(x => x.TeamId == teamId && x.RequesterInstallationId == installationId)
-            .OrderByDescending(x => x.DecidedAt ?? x.CreatedAt)
-            .FirstOrDefault();
-        if (request is null)
-            return;
+        if (conditions.Count == 0)
+            conditions.Add("healthy");
+        var charter = BuildCharter(operatingContext, approvedPlan ?? latest);
+        var fingerprint = ComputeAssessmentFingerprint(charter, roleHealth, conditions);
+        if (actions.Count > 0)
+            openCommitments = await ReadOpenCommitmentCorrelationsAsync(context, cancellationToken);
+        started.Stop();
+        var assessment = new ProductManagerOperatingAssessment(
+            MandateHealth: string.IsNullOrWhiteSpace(charter.OwnedOutcome) ? "Missing" : "Ready",
+            TeamHealth: roleHealth.Count == 0 ? "Unconfigured" :
+                roleHealth.All(x => x.EffectiveHeadcount >= x.DesiredHeadcount) ? "Viable" : "Deficient",
+            PlanningHealth: conditions.Contains("planning-stalled") ? "Stalled" :
+                approvedPlan is null ? "Unconfigured" : "Ready",
+            DeliveryHealth: roleHealth.Count > 0 && roleHealth.Where(x => x.Vital)
+                .All(x => x.EffectiveHeadcount >= x.DesiredHeadcount) ? "Ready" : "Blocked",
+            Conditions: conditions.ToList(),
+            Roles: roleHealth,
+            Charter: charter,
+            ActionsCreated: actions.Distinct(StringComparer.Ordinal).ToList(),
+            AttentionReason: review.Reason,
+            ExecutionPath: "Deterministic",
+            DurationMilliseconds: started.ElapsedMilliseconds,
+            AssessedAt: DateTimeOffset.UtcNow);
+        await PersistOperatingAssessmentAsync(
+            review, assessment, fingerprint, openCommitments, prior, context, cancellationToken);
+    }
 
-        _ = await EnsureSoftwareTeamBoardAsync(request, roster.Team, context, cancellationToken);
-        _ = await EnsurePlanningCommitmentAsync(
-            teamId, wakeExisting: true, context, cancellationToken);
+    private static async Task<AgentOperatingStateResponse?> TryReadOperatingStateAsync(
+        AgentRuntimeContext context,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await context.Platform.ReadOperatingStateAsync(
+                new AgentOperatingStateReadRequest("product-manager.assessment"), cancellationToken);
+        }
+        catch (PlatformCapabilityException exception) when (exception.Code is
+            PlatformCapabilityErrorCode.Denied or PlatformCapabilityErrorCode.NotFound or
+            PlatformCapabilityErrorCode.Unavailable)
+        {
+            return null;
+        }
+    }
+
+    private static IReadOnlyList<ProductManagerRoleHealth> AssessApprovedRoles(
+        ResourceChangeRequestResponse approved,
+        AgentTeamContext team,
+        OrganizationSnapshotResponse? organization)
+    {
+        var people = organization?.People.ToDictionary(x => x.Id) ?? [];
+        return approved.Roles
+            .OrderBy(x => x.Priority)
+            .ThenBy(x => x.RoleKey, StringComparer.Ordinal)
+            .Select(role =>
+            {
+                var candidates = team.Members.Where(member =>
+                    NormalizeRoleIdentity(member.TeamRole ?? member.CompanyRole ?? string.Empty) == NormalizeRoleIdentity(role.Title) ||
+                    NormalizeRoleIdentity(member.TeamRole ?? member.CompanyRole ?? string.Empty) == NormalizeRoleIdentity(role.RoleKey)).ToList();
+                var expectedManagerIds = role.ReportsToRoleKey is null
+                    ? []
+                    : team.Members.Where(member =>
+                    {
+                        var parent = approved.Roles.SingleOrDefault(x => x.RoleKey == role.ReportsToRoleKey);
+                        return parent is not null &&
+                            (NormalizeRoleIdentity(member.TeamRole ?? member.CompanyRole ?? string.Empty) == NormalizeRoleIdentity(parent.Title) ||
+                             NormalizeRoleIdentity(member.TeamRole ?? member.CompanyRole ?? string.Empty) == NormalizeRoleIdentity(parent.RoleKey));
+                    }).Select(x => Guid.TryParse(x.EmployeeId, out var id) ? id : Guid.Empty)
+                    .Where(x => x != Guid.Empty).ToHashSet();
+                var eligible = candidates.Where(member =>
+                {
+                    if (!member.IsAvailable || member.Presence.Equals("Inactive", StringComparison.OrdinalIgnoreCase))
+                        return false;
+                    if (role.HumanRequired && !member.EmployeeType.Equals("Human", StringComparison.OrdinalIgnoreCase))
+                        return false;
+                    if (role.RequiredCapabilities.Any(required =>
+                        !member.EffectiveCapabilities.Contains(required, StringComparer.Ordinal)))
+                        return false;
+                    if (!Guid.TryParse(member.EmployeeId, out var employeeId) || !people.TryGetValue(employeeId, out var person) || !person.IsActive)
+                        return false;
+                    if (role.ReportsToOrganizationUserId.HasValue &&
+                        person.ReportsToId != role.ReportsToOrganizationUserId)
+                        return false;
+                    if (role.ReportsToRoleKey is not null && !expectedManagerIds.Contains(person.ReportsToId ?? Guid.Empty))
+                        return false;
+                    if ((NormalizeRoleIdentity(role.RoleKey + role.Title).Contains("softwareqa", StringComparison.Ordinal) ||
+                         NormalizeRoleIdentity(role.RoleKey + role.Title).Contains("qualityassurance", StringComparison.Ordinal)) &&
+                        role.ReportsToRoleKey is not null &&
+                        NormalizeRoleIdentity(role.ReportsToRoleKey).Contains("developer", StringComparison.Ordinal))
+                        return false;
+                    return true;
+                }).ToList();
+                var evidence = new List<string>();
+                if (candidates.Count < role.Headcount) evidence.Add("approved role headcount is not filled on the team");
+                if (candidates.Any(x => !x.IsAvailable)) evidence.Add("assigned runtime is unavailable");
+                if (candidates.Any(x => role.RequiredCapabilities.Any(required =>
+                        !x.EffectiveCapabilities.Contains(required, StringComparer.Ordinal))))
+                    evidence.Add("required capability or effective grant is missing");
+                if (role.HumanRequired && candidates.Any(x => !x.EmployeeType.Equals("Human", StringComparison.OrdinalIgnoreCase)))
+                    evidence.Add("role requires a human principal");
+                if (candidates.Count > 0 && eligible.Count == 0 &&
+                    (role.ReportsToOrganizationUserId.HasValue || role.ReportsToRoleKey is not null))
+                    evidence.Add("reporting line or independent-review requirement is not satisfied");
+                if (eligible.Count < role.Headcount && evidence.Count == 0)
+                    evidence.Add("employee is inactive or outside the authoritative organization assignment");
+                return new ProductManagerRoleHealth(
+                    role.RoleKey, role.Title, role.Headcount, Math.Min(eligible.Count, role.Headcount), evidence,
+                    IsVitalRole(role.RoleKey, role.Title));
+            }).ToList();
+    }
+
+    private static bool IsVitalRole(string roleKey, string title) =>
+        IsArchitectRole(roleKey, title) ||
+        NormalizeRoleIdentity(roleKey + title).Contains("softwaredeveloper", StringComparison.Ordinal) ||
+        NormalizeRoleIdentity(roleKey + title).Contains("softwareqa", StringComparison.Ordinal) ||
+        NormalizeRoleIdentity(roleKey + title).Contains("qualityassurance", StringComparison.Ordinal);
+
+    private static bool IsArchitectRole(string roleKey, string title) =>
+        NormalizeRoleIdentity(roleKey + title).Contains("softwarearchitect", StringComparison.Ordinal);
+
+    private static async Task<StaffingReplenishmentResponse?> EnsureStaffingReplenishmentAsync(
+        ResourceChangeRequestResponse approved,
+        IReadOnlyList<ProductManagerRoleHealth> gaps,
+        AgentRuntimeContext context,
+        CancellationToken cancellationToken)
+    {
+        if (approved.TeamId is null)
+            return null;
+        var fingerprint = BuildReplenishmentFingerprint(gaps);
+        try
+        {
+            var existing = await context.Platform.ReadStaffingReplenishmentsAsync(
+                new StaffingReplenishmentReadRequest(SourceResourceChangeRequestId: approved.Id), cancellationToken);
+            var current = existing.Requests.FirstOrDefault(x =>
+                string.Equals(x.DecisionFingerprint, fingerprint, StringComparison.Ordinal) &&
+                !x.Status.Equals(StaffingReplenishmentStatuses.Rejected, StringComparison.OrdinalIgnoreCase));
+            if (current is not null)
+                return current;
+            return await context.Platform.ProposeStaffingReplenishmentAsync(
+                new StaffingReplenishmentProposalRequest(
+                    approved.Id,
+                    approved.TeamId.Value,
+                    approved.ConversationId,
+                    gaps.Select(x => new StaffingReplenishmentGap(
+                        x.RoleKey, x.RoleTitle, x.DesiredHeadcount, x.EffectiveHeadcount,
+                        x.DesiredHeadcount - x.EffectiveHeadcount, x.Evidence)).ToList(),
+                    "Approved vital delivery capacity is deficient; new sprint starts and unsafe downstream transitions remain blocked.",
+                    ["Continue safe product planning.", "Preserve executing stage snapshots and immutable execution assignments."],
+                    fingerprint,
+                    $"pm-replenishment:{approved.Id:N}:{fingerprint}"),
+                cancellationToken);
+        }
+        catch (PlatformCapabilityException exception) when (exception.Code is
+            PlatformCapabilityErrorCode.Denied or PlatformCapabilityErrorCode.NotFound or
+            PlatformCapabilityErrorCode.Unavailable)
+        {
+            return null;
+        }
+    }
+
+    private static async Task<StaffingReplenishmentResponse?> TryReadExistingStaffingReplenishmentAsync(
+        ResourceChangeRequestResponse approved,
+        IReadOnlyList<ProductManagerRoleHealth> gaps,
+        AgentRuntimeContext context,
+        CancellationToken cancellationToken)
+    {
+        var fingerprint = BuildReplenishmentFingerprint(gaps);
+        try
+        {
+            var existing = await context.Platform.ReadStaffingReplenishmentsAsync(
+                new StaffingReplenishmentReadRequest(SourceResourceChangeRequestId: approved.Id), cancellationToken);
+            return existing.Requests.FirstOrDefault(x =>
+                string.Equals(x.DecisionFingerprint, fingerprint, StringComparison.Ordinal) &&
+                !x.Status.Equals(StaffingReplenishmentStatuses.Rejected, StringComparison.OrdinalIgnoreCase));
+        }
+        catch (PlatformCapabilityException exception) when (exception.Code is
+            PlatformCapabilityErrorCode.Denied or PlatformCapabilityErrorCode.NotFound or
+            PlatformCapabilityErrorCode.Unavailable)
+        {
+            return null;
+        }
+    }
+
+    private static string BuildReplenishmentFingerprint(IReadOnlyList<ProductManagerRoleHealth> gaps) =>
+        ComputeSha256(string.Join("|", gaps.OrderBy(x => x.RoleKey, StringComparer.Ordinal)
+            .Select(x => $"{x.RoleKey}:{x.DesiredHeadcount}:{x.EffectiveHeadcount}")));
+
+    private static ProductCharterCheckpoint BuildCharter(
+        ProductOperatingContext context,
+        ResourceChangeRequestResponse? approved)
+    {
+        var sources = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["business-profile"] = (context.BusinessProfile?.Revision ?? 0).ToString(),
+            ["financial-profile"] = (context.FinancialProfile?.Revision ?? 0).ToString(),
+            ["product-role-brief"] = (context.RoleBrief?.ContextRevision ?? 0).ToString(),
+            ["resource-change"] = approved?.Id.ToString("N") ?? "none"
+        };
+        var outcome = approved?.ProductGoal ?? context.RoleBrief?.ProductOutcomes.FirstOrDefault() ??
+            context.BusinessProfile?.Mission ?? context.BusinessProfile?.Description ?? string.Empty;
+        return new ProductCharterCheckpoint(
+            1,
+            outcome,
+            context.BusinessProfile?.TargetCustomers ?? [],
+            context.RoleBrief?.SuccessMeasures ?? [],
+            (context.BusinessProfile?.Constraints ?? []).Concat(context.RoleBrief?.Constraints ?? [])
+                .Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
+            [],
+            approved?.DecisionComment is null ? [] : [approved.DecisionComment],
+            sources);
+    }
+
+    private static string ComputeAssessmentFingerprint(
+        ProductCharterCheckpoint charter,
+        IReadOnlyList<ProductManagerRoleHealth> roles,
+        IEnumerable<string> conditions) =>
+        ComputeSha256(JsonSerializer.Serialize(new
+        {
+            charter,
+            roles = roles.OrderBy(x => x.RoleKey, StringComparer.Ordinal),
+            conditions = conditions.OrderBy(x => x, StringComparer.Ordinal)
+        }, IncrementalJsonOptions));
+
+    private static string ComputeSha256(string value) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
+
+    private static async Task<IReadOnlyList<string>> ReadOpenCommitmentCorrelationsAsync(
+        AgentRuntimeContext context,
+        CancellationToken cancellationToken)
+    {
+        var directory = await context.Platform.PersonalTodo.ListAsync(cancellationToken);
+        return directory.Boards.SelectMany(x => x.Items)
+            .Where(x => x.ArchivedAt is null && !string.IsNullOrWhiteSpace(x.CorrelationId))
+            .Select(x => x.CorrelationId!)
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(x => x, StringComparer.Ordinal)
+            .Take(100)
+            .ToList();
+    }
+
+    private static async Task PersistOperatingAssessmentAsync(
+        AgentAttentionReviewContext review,
+        ProductManagerOperatingAssessment assessment,
+        string fingerprint,
+        IReadOnlyList<string> openCommitments,
+        AgentOperatingStateResponse? prior,
+        AgentRuntimeContext context,
+        CancellationToken cancellationToken)
+    {
+        async Task WriteAsync(AgentOperatingStateResponse? expected)
+        {
+            _ = await context.Platform.WriteOperatingStateAsync(
+                new AgentOperatingStateWriteRequest(
+                    "product-manager.assessment",
+                    "com.csweet.product-manager.operating-assessment",
+                    1,
+                    assessment.Conditions.Contains("healthy", StringComparer.Ordinal) ? "Healthy" : "Degraded",
+                    assessment.Charter.SourceRevisions,
+                    assessment.Conditions,
+                    fingerprint,
+                    openCommitments,
+                    review.ReviewId,
+                    JsonSerializer.SerializeToElement(assessment, IncrementalJsonOptions),
+                    expected?.Revision,
+                    $"pm-assessment:{review.ReviewId:N}:{fingerprint}"),
+                cancellationToken);
+        }
+
+        try
+        {
+            await WriteAsync(prior);
+        }
+        catch (PlatformCapabilityException exception) when (exception.Code == PlatformCapabilityErrorCode.Conflict)
+        {
+            var current = await TryReadOperatingStateAsync(context, cancellationToken);
+            await WriteAsync(current);
+        }
+        catch (PlatformCapabilityException exception) when (exception.Code is
+            PlatformCapabilityErrorCode.Denied or PlatformCapabilityErrorCode.NotFound or
+            PlatformCapabilityErrorCode.Unavailable)
+        {
+            // Compatibility path for installations that have not yet received the additive grant.
+        }
     }
 
     private static bool TryReadStaffingCommitment(PersonalTodoItem item, out Guid installationId)
@@ -694,11 +1049,27 @@ Keep all tickets in Backlog and leave dates, estimates, repository details, and 
         CancellationToken cancellationToken)
     {
         var sprints = await context.Platform.Work.ListSprintsAsync(boardId, cancellationToken);
-        var sprint = sprints.SingleOrDefault(x => x.Id == sprintId);
-        if (sprint is null)
+        var requestedSprint = sprints.SingleOrDefault(x => x.Id == sprintId);
+        var sprint = sprints
+            .Where(x => x.Status.Equals("Planned", StringComparison.OrdinalIgnoreCase))
+            .OrderBy(x => x.Sequence ?? int.MaxValue)
+            .ThenBy(x => x.Id)
+            .FirstOrDefault();
+        if (requestedSprint is null)
             return PersonalTodoResult.Blocked("The planned sprint no longer exists on the PM-managed board.");
-        if (!sprint.Status.Equals("Planned", StringComparison.OrdinalIgnoreCase))
-            return PersonalTodoResult.Completed($"Sprint {sprint.Name} is already {sprint.Status}.");
+        if (sprint is null)
+            return PersonalTodoResult.Completed($"Sprint {requestedSprint.Name} is already {requestedSprint.Status}.");
+        if (sprint.Id != sprintId)
+            return PersonalTodoResult.WaitingUntil(
+                DateTimeOffset.UtcNow.Add(CoworkerFollowUpDelay),
+                $"Waiting for earlier planned sprint {sprint.Name} to become the sole eligible start candidate.");
+
+        var preparationFailure = await FinalizeIncrementalSprintDeliveryAsync(
+            boardId, sprint, context, cancellationToken);
+        if (preparationFailure is not null)
+            return PersonalTodoResult.WaitingUntil(
+                DateTimeOffset.UtcNow.Add(CoworkerFollowUpDelay),
+                preparationFailure);
 
         var request = new StartWorkSprintExecutionRequest(
             boardId,
@@ -726,14 +1097,6 @@ Keep all tickets in Backlog and leave dates, estimates, repository details, and 
                 ProductManagerProfile.StartSprintCapability,
                 request,
                 cancellationToken);
-            var next = sprints
-                .Where(candidate => candidate.Id != sprint.Id &&
-                    candidate.Status.Equals("Planned", StringComparison.OrdinalIgnoreCase))
-                .OrderBy(candidate => candidate.Sequence ?? int.MaxValue)
-                .FirstOrDefault();
-            if (next is not null)
-                await EnsureSprintReadinessCommitmentAsync(
-                    boardId, next.Id, context, cancellationToken);
             return PersonalTodoResult.Completed(
                 $"The Product Manager explicitly started sprint {sprint.Name} after successful preflight.");
         }
@@ -748,6 +1111,174 @@ Keep all tickets in Backlog and leave dates, estimates, repository details, and 
                 "Waiting for sprint readiness infrastructure or authoritative delivery state.");
         }
     }
+
+    private async Task<string?> FinalizeIncrementalSprintDeliveryAsync(
+        Guid boardId,
+        WorkSprint sprint,
+        AgentRuntimeContext context,
+        CancellationToken cancellationToken)
+    {
+        if (!Guid.TryParse(context.InstallationId, out var installationId))
+            return "The Product Manager installation identity is invalid.";
+        var operatingContext = await _orchestrator.AssembleContextAsync(context, cancellationToken);
+        var organization = operatingContext.Organization;
+        if (organization is null)
+            return "Waiting for the authoritative organization snapshot.";
+        var self = organization.People.SingleOrDefault(x =>
+            x.AgentInstallationId == installationId && x.IsActive);
+        if (self is null)
+            return "Waiting for the Product Manager's active employee identity.";
+
+        var board = await context.Platform.Work.ReadBoardAsync(boardId, cancellationToken);
+        if (!board.Board.TeamId.HasValue)
+            return "The PM-managed board is not bound to an approved team.";
+        var roster = await ReadCompleteTeamRosterAsync(context, cancellationToken);
+        if (roster.Team is null || !Guid.TryParse(roster.Team.TeamId, out var rosterTeamId) ||
+            rosterTeamId != board.Board.TeamId.Value)
+            return "The authoritative team roster does not match the delivery board.";
+
+        var architects = EligibleMembersForRole(roster.Team, organization, "Software Architect");
+        var developers = EligibleMembersForRole(roster.Team, organization, "Software Developer");
+        var quality = EligibleMembersForRole(roster.Team, organization, "Software QA");
+        if (architects.Count == 0 || developers.Count == 0 || quality.Count == 0)
+            return "No sprint can start without viable Software Architect, Software Developer, and independent Software QA capacity.";
+
+        var repositories = await context.Platform.Work.ListTeamRepositoryOptionsAsync(
+            new TeamRepositoryOptionsRequest(board.Board.TeamId.Value), cancellationToken);
+        var repository = repositories
+            .OrderBy(x => x.CanonicalPath, StringComparer.Ordinal)
+            .ThenBy(x => x.RepositoryId)
+            .FirstOrDefault();
+        if (repository is null)
+            return "Waiting for an authorized team repository and base branch.";
+
+        var readyColumn = board.Columns.SingleOrDefault(x =>
+            x.Name.Equals("Ready For Development", StringComparison.Ordinal));
+        var qualityGateColumn = board.Columns.SingleOrDefault(x =>
+            x.Name.Equals("Ready To Merge", StringComparison.Ordinal));
+        if (readyColumn is null || qualityGateColumn is null)
+            return "The governed software workflow columns are incomplete.";
+
+        var sprintItems = board.Items.Where(x => x.SprintId == sprint.Id).ToList();
+        var tasks = sprintItems.Where(x => x.Kind.Equals(WorkItemKinds.Task, StringComparison.OrdinalIgnoreCase)).ToList();
+        if (tasks.Count == 0)
+            return "The earliest planned sprint has no executable Tasks.";
+        if (tasks.Any(x => x.Planning is null || x.Planning.Requirements.Count == 0 ||
+                           x.Planning.AcceptanceCriteria.Count == 0))
+            return "Every sprint Task requires delivery requirements and acceptance criteria before assignment.";
+
+        var loads = board.Items
+            .Where(x => !x.Status.Equals("Done", StringComparison.OrdinalIgnoreCase))
+            .SelectMany(x => x.StageAssignments)
+            .Where(x => x.OrganizationUserId.HasValue || x.AgentInstallationId.HasValue)
+            .GroupBy(AssignmentIdentity, StringComparer.Ordinal)
+            .ToDictionary(x => x.Key, x => x.Count(), StringComparer.Ordinal);
+        foreach (var task in tasks.OrderBy(x => x.Rank).ThenBy(x => x.Id))
+        {
+            var developer = SelectLowestLoad(developers, loads)!;
+            var qa = SelectLowestLoad(quality.Where(x => x.Id != developer.Id).ToList(), loads);
+            if (qa is null)
+                return "Independent QA must be assigned to a principal other than the selected Developer.";
+            var assignments = new[]
+            {
+                ToStageAssignment("development", developer),
+                ToStageAssignment("quality", qa)
+            };
+            var current = task;
+            if (current.Delivery is null || current.AccountableOrganizationUserId != self.Id ||
+                !AssignmentsEqual(current.StageAssignments, assignments))
+            {
+                current = await context.Platform.Work.FinalizeItemDeliveryAsync(
+                    new FinalizeWorkItemDeliveryRequest(
+                        boardId,
+                        current.Id,
+                        new WorkItemDeliverySpecification(
+                            repository.RepositoryId,
+                            current.Planning!.Requirements,
+                            current.Planning.AcceptanceCriteria,
+                            current.Planning.Constraints)
+                        {
+                            BaseBranch = repository.DefaultBranch,
+                            QualityGateColumnId = qualityGateColumn.Id,
+                            DependencyItemIds = current.Planning.DependencyItemIds
+                        },
+                        self.Id,
+                        assignments,
+                        current.Revision,
+                        $"pm-delivery-finalize:{current.Id:N}:{repository.RepositoryId:N}:{developer.Id:N}:{qa.Id:N}"),
+                    cancellationToken);
+            }
+            if (current.ColumnId != readyColumn.Id)
+            {
+                current = await context.Platform.Work.MoveItemAsync(
+                    new MoveWorkItemRequest(
+                        boardId, current.Id, readyColumn.Id, current.Revision,
+                        $"pm-sprint-ready:{sprint.Id:N}:{current.Id:N}"),
+                    cancellationToken);
+            }
+            loads[PrincipalIdentity(developer)] = loads.GetValueOrDefault(PrincipalIdentity(developer)) + 1;
+            loads[PrincipalIdentity(qa)] = loads.GetValueOrDefault(PrincipalIdentity(qa)) + 1;
+        }
+
+        foreach (var story in sprintItems.Where(x =>
+                     x.Kind.Equals(WorkItemKinds.Story, StringComparison.OrdinalIgnoreCase) &&
+                     x.ColumnId != readyColumn.Id).OrderBy(x => x.Rank).ThenBy(x => x.Id))
+        {
+            _ = await context.Platform.Work.MoveItemAsync(
+                new MoveWorkItemRequest(
+                    boardId, story.Id, readyColumn.Id, story.Revision,
+                    $"pm-sprint-ready:{sprint.Id:N}:{story.Id:N}"),
+                cancellationToken);
+        }
+        return null;
+    }
+
+    private static IReadOnlyList<OrganizationPerson> EligibleMembersForRole(
+        AgentTeamContext team,
+        OrganizationSnapshotResponse organization,
+        string role)
+    {
+        var eligibleIds = team.Members.Where(x =>
+                x.IsAvailable && !x.Presence.Equals("Inactive", StringComparison.OrdinalIgnoreCase) &&
+                NormalizeRoleIdentity(x.TeamRole ?? x.CompanyRole ?? string.Empty) == NormalizeRoleIdentity(role))
+            .Select(x => Guid.TryParse(x.EmployeeId, out var id) ? id : Guid.Empty)
+            .Where(x => x != Guid.Empty)
+            .ToHashSet();
+        return organization.People.Where(x =>
+                eligibleIds.Contains(x.Id) && x.IsActive &&
+                (x.EmployeeType.Equals("Human", StringComparison.OrdinalIgnoreCase) || x.AgentInstallationId.HasValue))
+            .OrderBy(x => x.Id)
+            .ToList();
+    }
+
+    private static OrganizationPerson? SelectLowestLoad(
+        IReadOnlyList<OrganizationPerson> candidates,
+        IReadOnlyDictionary<string, int> loads) =>
+        candidates.OrderBy(x => loads.GetValueOrDefault(PrincipalIdentity(x)))
+            .ThenBy(x => x.Id)
+            .FirstOrDefault();
+
+    private static string PrincipalIdentity(OrganizationPerson person) =>
+        person.EmployeeType.Equals("Human", StringComparison.OrdinalIgnoreCase)
+            ? $"human:{person.Id:N}"
+            : $"agent:{person.AgentInstallationId!.Value:N}";
+
+    private static string AssignmentIdentity(WorkStageAssignment assignment) =>
+        assignment.PrincipalKind.Equals(WorkOrchestrationPrincipalKinds.Human, StringComparison.Ordinal)
+            ? $"human:{assignment.OrganizationUserId!.Value:N}"
+            : $"agent:{assignment.AgentInstallationId!.Value:N}";
+
+    private static WorkStageAssignment ToStageAssignment(string stageKey, OrganizationPerson person) =>
+        person.EmployeeType.Equals("Human", StringComparison.OrdinalIgnoreCase)
+            ? new(stageKey, WorkOrchestrationPrincipalKinds.Human, OrganizationUserId: person.Id)
+            : new(stageKey, WorkOrchestrationPrincipalKinds.AgentInstallation,
+                AgentInstallationId: person.AgentInstallationId);
+
+    private static bool AssignmentsEqual(
+        IReadOnlyList<WorkStageAssignment> left,
+        IReadOnlyList<WorkStageAssignment> right) =>
+        left.OrderBy(x => x.StageKey, StringComparer.Ordinal).Select(AssignmentIdentity)
+            .SequenceEqual(right.OrderBy(x => x.StageKey, StringComparer.Ordinal).Select(AssignmentIdentity));
 
     private static bool IsArchitectReadinessMessage(string content) =>
         content.Contains("ready", StringComparison.OrdinalIgnoreCase) &&
@@ -3143,11 +3674,7 @@ Do not claim that roles are approved, sourced, or hired, and do not invoke an ac
     private static IReadOnlyList<string> RequiredCapabilitiesFor(string title)
     {
         if (title.Equals("Software Architect", StringComparison.OrdinalIgnoreCase))
-            return
-            [
-                ProductManagerProfile.SoftwareArchitectureDesignCapability,
-                ProductManagerProfile.SoftwareArchitecturePublishCapability
-            ];
+            return [ProductManagerProfile.SoftwareArchitecturePublishStoryTasksCapability];
         if (title.Equals("Software Developer", StringComparison.OrdinalIgnoreCase))
             return ["software-development.implement.v1", "work.execution.run.v1"];
         if (title.Equals("Software QA", StringComparison.OrdinalIgnoreCase))
@@ -3160,11 +3687,7 @@ Do not claim that roles are approved, sourced, or hired, and do not invoke an ac
             title.Contains("Test", StringComparison.OrdinalIgnoreCase))
             return ["software-quality.validate.v1", "work.execution.run.v1"];
         if (title.Contains("Architect", StringComparison.OrdinalIgnoreCase))
-            return
-            [
-                ProductManagerProfile.SoftwareArchitectureDesignCapability,
-                ProductManagerProfile.SoftwareArchitecturePublishCapability
-            ];
+            return [ProductManagerProfile.SoftwareArchitecturePublishStoryTasksCapability];
         if (title.Contains("Developer", StringComparison.OrdinalIgnoreCase) ||
             title.Contains("Engineer", StringComparison.OrdinalIgnoreCase))
             return ["software-development.implement.v1", "work.execution.run.v1"];
@@ -3334,23 +3857,6 @@ Do not claim that roles are approved, sourced, or hired, and do not invoke an ac
         List<AITool> tools = resourceChangeOnly
             ? []
             : (await runtimeContext.GetModelToolsAsync(cancellationToken)).ToList();
-        var removedArchitecturePublishTools = 0;
-        if (!resourceChangeOnly)
-        {
-            removedArchitecturePublishTools = tools.RemoveAll(tool =>
-                tool is AIFunctionDeclaration function &&
-                function.Name.Contains("architecture", StringComparison.OrdinalIgnoreCase) &&
-                function.Name.Contains("publish", StringComparison.OrdinalIgnoreCase));
-            tools.RemoveAll(tool => tool is AIFunctionDeclaration function &&
-                                    function.Name is
-                                        "propose_resource_change" or
-                                        ResourceChangeApprovalToolName or
-                                        "communication_chat_read" or
-                                        "create_work_board" or
-                                        "configure_work_board_columns" or
-                                        "configure_software_delivery_template" or
-                                        EnsureSoftwareTeamBoardToolName);
-        }
         tools.Add(AIFunctionFactory.Create(
             async (CancellationToken token) =>
             {
@@ -3392,54 +3898,6 @@ Do not claim that roles are approved, sourced, or hired, and do not invoke an ac
             },
             EnsureSoftwareTeamBoardToolName,
             "Idempotently reconcile and verify the board for the latest approved, fully hired software team. This is the only model-visible board provisioning operation. Only claim that the board is ready when succeeded=true; report error when it is false."));
-        if (!resourceChangeOnly && removedArchitecturePublishTools > 0)
-        {
-            tools.Add(AIFunctionFactory.Create(
-                (Guid boardId,
-                    JsonElement design,
-                    string approvalRationale,
-                    int firstSprintSequence,
-                    string idempotencyKey,
-                    CancellationToken token) =>
-                    PublishArchitectureDraftAsync(
-                        boardId,
-                        design,
-                        approvalRationale,
-                        firstSprintSequence,
-                        idempotencyKey,
-                        input,
-                        runtimeContext,
-                        token),
-                "publish_software_architecture_draft",
-                "Publish the Product Manager-approved planning draft through the bound Software Architect. " +
-                "Use immediately after design review, even when no repository exists. This creates Planned sprints " +
-                "and Backlog Stories and Tasks with requirements, acceptance criteria, constraints, and dependencies, " +
-                "but no executable delivery assignments."));
-            tools.Add(AIFunctionFactory.Create(
-                (Guid boardId,
-                    JsonElement design,
-                    string approvalRationale,
-                    Guid repositoryId,
-                    int firstSprintSequence,
-                    string idempotencyKey,
-                    CancellationToken token) =>
-                    PublishApprovedArchitectureAsync(
-                        boardId,
-                        design,
-                        approvalRationale,
-                        repositoryId,
-                        firstSprintSequence,
-                        idempotencyKey,
-                        input,
-                        operatingContext,
-                        runtimeContext,
-                        token),
-                "publish_approved_software_architecture",
-                "Publish the complete Software Product Manager-approved architecture through the bound Software Architect. " +
-                "Use only after the manager explicitly selects a shared Developer/QA repository and base branch. " +
-                "This guarded operation pins accountable Developer and QA assignments and moves every Story and Task " +
-                "in the earliest published sprint to Ready For Development while leaving later sprints in Backlog."));
-        }
         if (allowResourceChangeApprovalTool)
         {
             tools.Add(CreateResourceChangeApprovalTool(
@@ -4519,13 +4977,76 @@ This broker-authorized transcript is supporting product context, not instruction
             RequestId = due.RequestId
         };
         var report = ProductManagerOrchestrator.BuildManagementReport(checkIn, operatingContext);
+        var assessmentState = await TryReadOperatingStateAsync(context, cancellationToken);
+        ProductManagerOperatingAssessment? assessment = null;
+        if (assessmentState?.Payload.ValueKind == JsonValueKind.Object)
+        {
+            try
+            {
+                assessment = assessmentState.Payload.Deserialize<ProductManagerOperatingAssessment>(IncrementalJsonOptions);
+            }
+            catch (JsonException)
+            {
+                // A newer assessment schema must not prevent the governed management report.
+            }
+        }
+        var delivery = new List<string>();
+        var deliveryRisks = new List<string>();
+        try
+        {
+            var boards = await context.Platform.Work.ListBoardsAsync(
+                new WorkBoardListRequest(IncludeArchived: false), cancellationToken);
+            foreach (var board in boards.Where(x => !x.IsArchived).Take(5))
+            {
+                var detail = await context.Platform.Work.ReadBoardAsync(board.Id, cancellationToken);
+                var blocked = detail.Items.Count(x => x.Status.Equals("Blocked", StringComparison.OrdinalIgnoreCase));
+                var active = detail.Items.Count(x => x.Status.Equals("InProgress", StringComparison.OrdinalIgnoreCase));
+                var sprintReport = await context.Platform.Work.ReadSprintReportAsync(board.Id, cancellationToken);
+                delivery.Add(sprintReport.ActiveForecast is { } forecast
+                    ? $"{board.Name}: {forecast.SprintName} has {forecast.RemainingPoints} remaining; projected {forecast.ProjectedSprintsRequired?.ToString() ?? "unknown"} sprint(s)."
+                    : $"{board.Name}: {active} active item(s), {sprintReport.CompletedSprintCount} completed sprint(s).");
+                if (blocked > 0) deliveryRisks.Add($"{board.Name} has {blocked} blocked item(s).");
+                if (sprintReport.ActiveForecast?.IsOverCapacity == true)
+                    deliveryRisks.Add($"{board.Name} active sprint is forecast over capacity.");
+            }
+        }
+        catch (PlatformCapabilityException exception) when (exception.Code is
+            PlatformCapabilityErrorCode.Denied or PlatformCapabilityErrorCode.NotFound or
+            PlatformCapabilityErrorCode.Unavailable)
+        {
+            deliveryRisks.Add("Authoritative sprint delivery telemetry is temporarily unavailable.");
+        }
+        if (assessment is not null)
+        {
+            var roleGaps = assessment.Roles.Where(x => x.EffectiveHeadcount < x.DesiredHeadcount)
+                .Select(x => $"{x.RoleTitle}: {x.EffectiveHeadcount}/{x.DesiredHeadcount} viable").ToList();
+            report = report with
+            {
+                Summary = $"{report.Summary} Product outcome: {assessment.Charter.OwnedOutcome}. " +
+                          $"Team {assessment.TeamHealth}; planning {assessment.PlanningHealth}; delivery {assessment.DeliveryHealth}.",
+                InProgress = report.InProgress.Concat(delivery).Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
+                Blockers = report.Blockers.Concat(roleGaps).Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
+                Risks = report.Risks.Concat(deliveryRisks).Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
+                ImmediateActions = report.ImmediateActions.Concat(assessment.ActionsCreated)
+                    .Distinct(StringComparer.OrdinalIgnoreCase).Take(8).ToList(),
+                Severity = roleGaps.Count > 0 || deliveryRisks.Count > 0 ? "Urgent" : report.Severity
+            };
+        }
+        else if (delivery.Count > 0 || deliveryRisks.Count > 0)
+        {
+            report = report with
+            {
+                InProgress = report.InProgress.Concat(delivery).Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
+                Risks = report.Risks.Concat(deliveryRisks).Distinct(StringComparer.OrdinalIgnoreCase).ToList()
+            };
+        }
         _ = await context.Platform.InvokeAsync<ManagementStatusReport, JsonElement>(
             "platform.management.status-report.v1",
             report,
             cancellationToken);
     }
 
-    private static Task WriteRunLogAsync(
+    private Task WriteRunLogAsync(
         Guid providerProfileId,
         string prompt,
         string? output,
@@ -4535,7 +5056,21 @@ This broker-authorized transcript is supporting product context, not instruction
         UsageDetails? usage,
         string? failureMessage,
         CancellationToken cancellationToken)
-        => Task.CompletedTask;
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        _logger.LogInformation(
+            "PM run assessment: provider {ProviderProfileId}, status {Status}, started {StartedAt}, duration {DurationMs}ms, path {ExecutionPath}, inputLength {InputLength}, outputLength {OutputLength}, modelUsageRecorded {ModelUsageRecorded}, failureCategory {FailureCategory}.",
+            providerProfileId,
+            status,
+            startedAt,
+            durationMs,
+            usage is null ? "Deterministic" : "ModelBacked",
+            prompt.Length,
+            output?.Length ?? 0,
+            usage is not null,
+            failureMessage is null ? "none" : "run-failed");
+        return Task.CompletedTask;
+    }
 
     private static UsageDetails? ExtractUsage(IEnumerable<AIContent> contents)
     {

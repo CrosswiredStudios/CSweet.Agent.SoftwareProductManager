@@ -44,6 +44,38 @@ public sealed record ProductOperatingContext(
     ProductRoleBriefResponse? RoleBrief,
     IReadOnlyList<string> UnavailableCapabilities);
 
+public sealed record ProductCharterCheckpoint(
+    int Version,
+    string OwnedOutcome,
+    IReadOnlyList<string> TargetCustomers,
+    IReadOnlyList<string> SuccessMeasures,
+    IReadOnlyList<string> Constraints,
+    IReadOnlyList<string> NonGoals,
+    IReadOnlyList<string> ManagerDecisions,
+    IReadOnlyDictionary<string, string> SourceRevisions);
+
+public sealed record ProductManagerRoleHealth(
+    string RoleKey,
+    string RoleTitle,
+    int DesiredHeadcount,
+    int EffectiveHeadcount,
+    IReadOnlyList<string> Evidence,
+    bool Vital);
+
+public sealed record ProductManagerOperatingAssessment(
+    string MandateHealth,
+    string TeamHealth,
+    string PlanningHealth,
+    string DeliveryHealth,
+    IReadOnlyList<string> Conditions,
+    IReadOnlyList<ProductManagerRoleHealth> Roles,
+    ProductCharterCheckpoint Charter,
+    IReadOnlyList<string> ActionsCreated,
+    string AttentionReason,
+    string ExecutionPath,
+    long DurationMilliseconds,
+    DateTimeOffset AssessedAt);
+
 public sealed record ArchitecturePublicationApproval(
     string ApproverRole,
     string Rationale,

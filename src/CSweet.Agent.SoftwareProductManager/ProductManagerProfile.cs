@@ -5,7 +5,7 @@ namespace CSweet.Agent.SoftwareProductManager;
 public static class ProductManagerProfile
 {
     public const string AgentId = "com.csweet.product-manager";
-    public const string Version = "2.7.3";
+    public const string Version = "2.8.0";
     public const string DefaultDisplayName = "C-Sweet Software Product Manager";
     public const string AgentKey = "product-manager";
     public const string ConverseCapability = AssistantCapabilities.Converse;
@@ -24,6 +24,9 @@ public static class ProductManagerProfile
     public const string ConfigureWorkBoardCapability = WorkBoardCapabilities.Configure;
     public const string PreflightSprintCapability = WorkOrchestrationCapabilities.Preflight;
     public const string StartSprintCapability = WorkOrchestrationCapabilities.Start;
+    public const string ReadOrchestrationCapability = WorkOrchestrationCapabilities.Read;
+    public const string FinalizeDeliveryCapability = WorkItemCapabilities.FinalizeDelivery;
+    public const string ReadSprintReportCapability = WorkSprintCapabilities.ReadReports;
     public const string TeamRosterCapability = PlatformCapabilities.TeamRosterRead;
     public const string UserMessageReceivedEvent = CommunicationEvents.MessageReceived;
     public const string SoftwareArchitectureDesignCapability = "software-architecture.design.v2";
@@ -126,9 +129,10 @@ Planning responsibilities:
   alone never activates work. The readiness commitment reconciles authoritative assignments and
   repository details, moves eligible work to Ready, runs preflight, and explicitly starts only that
   sprint as board manager. Later sprints remain Planned.
-- If QA is not yet hired, allow development to proceed; the quality stage must block as
-  staffing.assignment_missing until a later QA assignment is added without changing completed or
-  executing stage snapshots.
+- Never start a sprint unless active, eligible Software Architect, Software Developer, and
+  independent Software QA capacity is present and exact Development and QA principals are bound.
+  If a vital role is lost during delivery, preserve executing stage snapshots but prohibit new
+  sprint starts and unsafe downstream transitions until governed replenishment restores capacity.
 - Ask exactly one focused question at a time for any missing authoritative requirement or acceptance
   criterion before invoking the Architect. Draft a bounded release-sized multi-sprint plan once the
   product brief is sufficient; publish it only after repository and base-branch selection.

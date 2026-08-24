@@ -1,0 +1,43 @@
+{
+  "schemaVersion": "1.0",
+  "suite": "software-product-manager.lifecycle.v1",
+  "modelSelection": "all-supported-configured-model-profiles",
+  "scenarios": [
+    {
+      "key": "initial-discovery",
+      "requiresModel": true,
+      "criteria": ["uses-authoritative-context", "asks-at-most-one-focused-question", "produces-versioned-charter"]
+    },
+    {
+      "key": "bounded-hiring-design",
+      "requiresModel": true,
+      "criteria": ["smallest-complete-team", "explicit-reporting-lines", "manager-approval-required"]
+    },
+    {
+      "key": "roadmap-refresh",
+      "requiresModel": true,
+      "criteria": ["outcome-oriented", "source-revision-grounded", "deduplicated-commitment"]
+    },
+    {
+      "key": "architect-interaction",
+      "requiresModel": true,
+      "criteria": ["bounded-turns", "strict-artifact-validation", "incremental-task-pages"]
+    },
+    {
+      "key": "replacement-plan-explanation",
+      "requiresModel": true,
+      "criteria": ["references-approved-baseline", "states-operational-impact", "does-not-self-approve"]
+    },
+    {
+      "key": "escalation-quality",
+      "requiresModel": true,
+      "criteria": ["material-condition-only", "decision-owner-explicit", "immediate-action-explicit"]
+    }
+  ],
+  "deterministicScenarios": [
+    "unchanged-healthy-zero-model-calls",
+    "unchanged-gap-no-duplicate-request",
+    "qa-loss-blocks-sprint-start",
+    "restart-replays-open-commitments"
+  ]
+}

@@ -63,6 +63,13 @@ public sealed class ProductManagerProfileTests
         Assert.Contains(ProductManagerProfile.SendCommunicationMessageCapability, requires);
         Assert.Contains(ProductManagerProfile.ProposeResourceChangeCapability, requires);
         Assert.Contains(PlatformCapabilities.ResourceChangeRead, requires);
+        Assert.Contains(PlatformCapabilities.AgentOperatingStateRead, requires);
+        Assert.Contains(PlatformCapabilities.AgentOperatingStateWrite, requires);
+        Assert.Contains(PlatformCapabilities.StaffingReplenishmentPropose, requires);
+        Assert.Contains(PlatformCapabilities.StaffingReplenishmentRead, requires);
+        Assert.Contains(WorkItemCapabilities.FinalizeDelivery, requires);
+        Assert.Contains(WorkSprintCapabilities.ReadReports, requires);
+        Assert.Contains(WorkOrchestrationCapabilities.Read, requires);
         Assert.Contains(AgentLifecycleCapabilities.CompleteOnboarding, requires);
         Assert.Contains(MemoryCapabilities.BusinessRead, requires);
     }
@@ -81,6 +88,11 @@ public sealed class ProductManagerProfileTests
 
         using var document = JsonDocument.Parse(await File.ReadAllTextAsync(manifestPath));
         var root = document.RootElement;
+        Assert.Equal(AgentRolePolicyProfiles.Manager,
+            root.GetProperty("rolePolicy").GetProperty("profile").GetString());
+        Assert.Equal(["software-product-manager"],
+            root.GetProperty("rolePolicy").GetProperty("declaredRoleKeys").EnumerateArray()
+                .Select(item => item.GetString()!).ToArray());
         Assert.All(root.GetProperty("provides").EnumerateArray(), capability =>
         {
             Assert.False(capability.GetProperty("inputSchema").GetProperty("additionalProperties").GetBoolean());
@@ -96,6 +108,8 @@ public sealed class ProductManagerProfileTests
                 AgentAttentionEvents.ReviewDue,
                 ManagementEvents.ReviewDue,
                 ManagementEvents.ResourceChangeDecided,
+                StaffingReplenishmentEvents.Decided,
+                WorkforceEvents.Changed,
                 ProductManagerProfile.RecommendationFulfilledEvent
             ],
             root.GetProperty("events").GetProperty("subscribes").EnumerateArray()
@@ -121,9 +135,30 @@ public sealed class ProductManagerProfileTests
             "src",
             "CSweet.Agent.SoftwareProductManager",
             "CSweet.Agent.SoftwareProductManager.csproj"));
-        Assert.Contains("CSweet.Agent.SDK\" Version=\"3.13.0", project, StringComparison.Ordinal);
+        Assert.Contains("CSweet.Agent.SDK\" Version=\"3.14.0", project, StringComparison.Ordinal);
         Assert.Contains("<ProjectReference", project, StringComparison.Ordinal);
         Assert.Contains($"<Version>{ProductManagerProfile.Version}</Version>", project, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void LifecycleEvalSuite_CoversRequiredModelAndDeterministicScenarios()
+    {
+        var root = Path.GetDirectoryName(ManifestPath())!;
+        using var document = JsonDocument.Parse(File.ReadAllText(Path.Combine(
+            root, "evals", "product-manager-lifecycle.v1.json")));
+        Assert.Equal("all-supported-configured-model-profiles",
+            document.RootElement.GetProperty("modelSelection").GetString());
+        var scenarios = document.RootElement.GetProperty("scenarios").EnumerateArray()
+            .Select(x => x.GetProperty("key").GetString()).ToHashSet(StringComparer.Ordinal);
+        Assert.True(new[]
+        {
+            "initial-discovery", "bounded-hiring-design", "roadmap-refresh",
+            "architect-interaction", "replacement-plan-explanation", "escalation-quality"
+        }.All(scenarios.Contains));
+        var deterministic = document.RootElement.GetProperty("deterministicScenarios").EnumerateArray()
+            .Select(x => x.GetString()).ToHashSet(StringComparer.Ordinal);
+        Assert.Contains("unchanged-healthy-zero-model-calls", deterministic);
+        Assert.Contains("qa-loss-blocks-sprint-start", deterministic);
     }
 
     [Fact]
@@ -1890,7 +1925,7 @@ Revert the isolated state module.
                 (request, _) => Task.FromResult(board with
                 {
                     Name = request.Name,
-                    Description = request.Description,
+                    Description = request.Description ?? string.Empty,
                     Revision = request.ExpectedRevision + 1
                 }))
             .RegisterCapability<ConfigureSoftwareOrchestrationTemplateRequest, WorkOrchestrationPolicyRevision>(

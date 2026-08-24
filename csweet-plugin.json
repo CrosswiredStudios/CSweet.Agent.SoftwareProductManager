@@ -1,9 +1,13 @@
 {
   "manifestVersion": "2.0",
   "kind": "agent",
+  "rolePolicy": {
+    "profile": "manager.v1",
+    "declaredRoleKeys": ["software-product-manager"]
+  },
   "id": "com.csweet.product-manager",
   "name": "C-Sweet Software Product Manager",
-  "version": "2.7.3",
+  "version": "2.8.0",
   "publisher": {
     "id": "com.csweet",
     "name": "C-Sweet"
@@ -547,30 +551,37 @@
     { "name": "communication.coordination.list.v1", "scope": "team", "purpose": "List the Product Manager's own planning sessions for deterministic recovery" },
     { "name": "communication.coordination.resume.v1", "scope": "team", "purpose": "Resume a failed Product Manager-initiated planning session" },
     { "name": "communication.coordination.cancel.v1", "scope": "team", "purpose": "Stop an authorized PM-Architect collaboration" },
-    { "name": "platform.management.resource-change.propose.v1", "scope": "organization", "purpose": "Propose one atomic desired-team snapshot to the current manager" },
+    { "name": "platform.management.resource-change.propose.v1", "scope": "organization", "purpose": "Propose one atomic desired-team snapshot to the current manager", "modelVisible": false },
     { "name": "platform.management.resource-change.read.v1", "scope": "organization", "purpose": "Read the Software Product Manager's resource-change requests and decisions" },
-    { "name": "work.board.create", "scope": "team", "purpose": "Create one software-team kanban board after manager approval" },
+    { "name": "platform.management.staffing-replenishment.propose.v1", "scope": "team", "purpose": "Propose one deduplicated governed replacement plan when approved viable capacity is lost" },
+    { "name": "platform.management.staffing-replenishment.read.v1", "scope": "team", "purpose": "Reconcile replacement requests and manager decisions" },
+    { "name": "platform.agent-operating-state.read.v1", "scope": "organization", "purpose": "Read the previous typed PM assessment checkpoint" },
+    { "name": "platform.agent-operating-state.write.v1", "scope": "organization", "purpose": "Persist a revision-safe typed PM assessment after authoritative reconciliation" },
+    { "name": "work.board.create", "scope": "team", "purpose": "Create one software-team kanban board after manager approval", "modelVisible": false },
     { "name": "work.board.read", "scope": "team", "purpose": "Read the approved software team's board and exact workflow columns" },
-    { "name": "work.board.configure", "scope": "team", "purpose": "Set or correct the concise outcome-focused name of the Product Manager's board" },
-    { "name": "work.board.columns.configure", "scope": "team", "purpose": "Configure the approved software team's seven-column workflow" },
+    { "name": "work.board.configure", "scope": "team", "purpose": "Set or correct the concise outcome-focused name of the Product Manager's board", "modelVisible": false },
+    { "name": "work.board.columns.configure", "scope": "team", "purpose": "Configure the approved software team's seven-column workflow", "modelVisible": false },
     { "name": "work.item.read", "scope": "team", "purpose": "Read published sprint tickets before revision-safe readiness moves" },
     { "name": "work.item.create", "scope": "team", "purpose": "Create idempotent decision-ready planning tickets during approved agent collaboration" },
     { "name": "work.item.comment", "scope": "team", "purpose": "Record authoritative product-context decisions on affected planning tickets" },
     { "name": "work.item.move", "scope": "team", "purpose": "Move the first planned sprint's Stories and Tasks to Ready For Development" },
+    { "name": "work.item.delivery.finalize", "scope": "team", "purpose": "Bind repository, accountable PM, and exact Development and independent QA principals before readiness" },
     { "name": "work.sprint.read", "scope": "team", "purpose": "Verify planned sprint groupings and recover durable PM-Architect planning sessions" },
     { "name": "work.sprint.create", "scope": "team", "purpose": "Create idempotent Planned sprints while refining one approved Epic at a time" },
     { "name": "work.sprint.scope.manage", "scope": "team", "purpose": "Place approved Stories into Planned sprints without starting execution" },
-    { "name": "work.orchestration.software-template.configure", "scope": "team", "purpose": "Publish the bounded software delivery policy for the approved team board" },
+    { "name": "work.sprint.report.read", "scope": "team", "purpose": "Monitor active delivery forecast, blockers, stage failures, and QA rework" },
+    { "name": "work.orchestration.software-template.configure", "scope": "team", "purpose": "Publish the bounded software delivery policy for the approved team board", "modelVisible": false },
     { "name": "work.orchestration.preflight", "scope": "team", "purpose": "Validate the selected sprint before Product Manager activation" },
     { "name": "work.orchestration.start", "scope": "team", "purpose": "Explicitly activate one ready sprint as its assigned board manager" },
+    { "name": "work.orchestration.read", "scope": "team", "purpose": "Read authoritative execution and stage state without mutating executing snapshots" },
     { "name": "source-control.repository.team-options.v2", "scope": "team", "purpose": "Present only code projects enabled by the current team's delivery policy" },
     { "name": "source-control.repository.provision.v2", "scope": "organization", "purpose": "Request one policy-bounded private Managed GitHub project when explicitly granted" },
     { "name": "management.product-role-brief.v1", "scope": "organization", "purpose": "Request an authoritative role brief from the active Chief of Staff sharing the CEO manager" },
     { "name": "management.product-plan.review.v1", "scope": "organization", "purpose": "Submit the initial product and product-team recommendation to the CEO-peer Chief of Staff for reconciliation" },
     { "name": "management.product-escalation.v1", "scope": "organization", "purpose": "Route executive information gaps and decisions through the CEO-peer Chief of Staff liaison" },
-    { "name": "software-architecture.design.v2", "scope": "team", "purpose": "Request typed outcome Epics, planned Stories, and complete Task decomposition from the bound Software Architect" },
-    { "name": "software-architecture.publish-plan.v2", "scope": "team", "purpose": "Publish the Product Manager-approved hierarchical provisional or executable architecture plan" },
-    { "name": "software-architecture.publish-story-tasks.v1", "scope": "team", "purpose": "Publish one Product Manager-approved page of junior-ready Tasks beneath one Story" }
+    { "name": "software-architecture.design.v2", "scope": "team", "purpose": "Compatibility-only typed architecture surface invoked by deterministic PM coordination", "modelVisible": false },
+    { "name": "software-architecture.publish-plan.v2", "scope": "team", "purpose": "Compatibility-only full publication surface retained during migration", "modelVisible": false },
+    { "name": "software-architecture.publish-story-tasks.v1", "scope": "team", "purpose": "Publish one PM-approved page of junior-ready Tasks beneath one Story through deterministic coordination", "modelVisible": false }
   ],
   "events": {
     "subscribes": [
@@ -582,6 +593,8 @@
       "com.csweet.agent.attention.review-due.v1",
       "com.csweet.management.review.due.v1",
       "com.csweet.management.resource-change.decided.v1",
+      "com.csweet.management.staffing-replenishment.decided.v1",
+      "com.csweet.workforce.changed.v1",
       "com.csweet.hiring-recommendation.fulfilled.v1"
     ]
   },
