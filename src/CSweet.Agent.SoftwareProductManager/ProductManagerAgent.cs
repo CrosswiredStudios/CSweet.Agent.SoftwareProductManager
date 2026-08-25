@@ -174,6 +174,7 @@ or denied. Otherwise perform the task and return a concise completion summary.
         var conditions = new SortedSet<string>(StringComparer.Ordinal);
         var roleHealth = new List<ProductManagerRoleHealth>();
         var prior = await TryReadOperatingStateAsync(context, cancellationToken);
+        var priorAssessment = prior?.Payload.Deserialize<ProductManagerOperatingAssessment>(IncrementalJsonOptions);
         var openCommitments = await ReadOpenCommitmentCorrelationsAsync(context, cancellationToken);
         var operatingContext = await _orchestrator.AssembleContextAsync(context, cancellationToken);
         var resourceChanges = await context.Platform.ReadResourceChangesAsync(
@@ -240,12 +241,16 @@ or denied. Otherwise perform the task and return a concise completion summary.
                     }
 
                     var vitalGaps = roleHealth.Where(x => x.Vital && x.EffectiveHeadcount < x.DesiredHeadcount).ToList();
+                    var replenishmentGaps = SelectReplenishmentGaps(vitalGaps, priorAssessment);
                     StaffingReplenishmentResponse? existingReplacement = null;
                     if (vitalGaps.Count > 0)
                     {
                         conditions.Add("delivery-unconfigured");
+                    }
+                    if (replenishmentGaps.Count > 0)
+                    {
                         existingReplacement = await TryReadExistingStaffingReplenishmentAsync(
-                            approvedPlan, vitalGaps, context, cancellationToken);
+                            approvedPlan, replenishmentGaps, context, cancellationToken);
                         if (existingReplacement?.Status.Equals(
                                 StaffingReplenishmentStatuses.Pending, StringComparison.OrdinalIgnoreCase) == true)
                             conditions.Add("awaiting-approval");
@@ -265,10 +270,10 @@ or denied. Otherwise perform the task and return a concise completion summary.
                             teamId, wakeExisting: !unchanged, context, cancellationToken);
                         actions.Add(planning.CorrelationId ?? planningCorrelation);
                     }
-                    if (vitalGaps.Count > 0 && (existingReplacement is null || !unchanged))
+                    if (replenishmentGaps.Count > 0 && (existingReplacement is null || !unchanged))
                     {
                         var replacement = existingReplacement ?? await EnsureStaffingReplenishmentAsync(
-                            approvedPlan, vitalGaps, context, cancellationToken);
+                            approvedPlan, replenishmentGaps, context, cancellationToken);
                         if (replacement is not null)
                         {
                             actions.Add($"staffing-replenishment:{replacement.Id:N}");
@@ -287,6 +292,11 @@ or denied. Otherwise perform the task and return a concise completion summary.
         if (actions.Count > 0)
             openCommitments = await ReadOpenCommitmentCorrelationsAsync(context, cancellationToken);
         started.Stop();
+        var fulfilledRoleKeys = (priorAssessment?.FulfilledRoleKeys ?? [])
+            .Concat(roleHealth.Where(x => x.EffectiveHeadcount >= x.DesiredHeadcount).Select(x => x.RoleKey))
+            .Distinct(StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal)
+            .ToList();
         var assessment = new ProductManagerOperatingAssessment(
             MandateHealth: string.IsNullOrWhiteSpace(charter.OwnedOutcome) ? "Missing" : "Ready",
             TeamHealth: roleHealth.Count == 0 ? "Unconfigured" :
@@ -302,7 +312,10 @@ or denied. Otherwise perform the task and return a concise completion summary.
             AttentionReason: review.Reason,
             ExecutionPath: "Deterministic",
             DurationMilliseconds: started.ElapsedMilliseconds,
-            AssessedAt: DateTimeOffset.UtcNow);
+            AssessedAt: DateTimeOffset.UtcNow)
+        {
+            FulfilledRoleKeys = fulfilledRoleKeys
+        };
         await PersistOperatingAssessmentAsync(
             review, assessment, fingerprint, openCommitments, prior, context, cancellationToken);
     }
@@ -396,6 +409,18 @@ or denied. Otherwise perform the task and return a concise completion summary.
 
     private static bool IsVitalRole(ResourceChangeRole role) =>
         role.RoleCategoryKey is ArchitectRoleCategory or DeveloperRoleCategory or QualityRoleCategory;
+
+    internal static IReadOnlyList<ProductManagerRoleHealth> SelectReplenishmentGaps(
+        IReadOnlyList<ProductManagerRoleHealth> currentGaps,
+        ProductManagerOperatingAssessment? priorAssessment)
+    {
+        var previouslyFulfilled = (priorAssessment?.FulfilledRoleKeys ?? [])
+            .ToHashSet(StringComparer.Ordinal);
+        return currentGaps
+            .Where(gap => gap.Vital && previouslyFulfilled.Contains(gap.RoleKey))
+            .OrderBy(gap => gap.RoleKey, StringComparer.Ordinal)
+            .ToList();
+    }
 
     private static bool IsArchitectRole(ResourceChangeRole role) =>
         role.RoleCategoryKey == ArchitectRoleCategory;

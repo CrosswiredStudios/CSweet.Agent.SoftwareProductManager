@@ -1,7 +1,7 @@
 # C-Sweet Software Product Manager
 
 First-party Software Product Manager agent for C-Sweet, built on `CSweet.Agent.SDK` 3.19.1 and manifest protocol v2.
-The agent package version is `2.12.1`.
+The agent package version is `2.12.2`.
 
 The configured-model lifecycle matrix is defined in
 [`evals/product-manager-lifecycle.v1.json`](evals/product-manager-lifecycle.v1.json) and must run

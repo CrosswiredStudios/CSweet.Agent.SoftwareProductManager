@@ -26,6 +26,27 @@ public sealed class ProductManagerProfileTests
     }
 
     [Fact]
+    public void ReplenishmentGaps_RequireEvidenceThatRoleWasPreviouslyFilled()
+    {
+        var architect = new ProductManagerRoleHealth(
+            "architect", "software-architect", "Architect", 1, 0, ["missing"], true);
+        var quality = new ProductManagerRoleHealth(
+            "quality", "software-qa", "QA", 1, 0, ["missing"], true);
+        var prior = new ProductManagerOperatingAssessment(
+            "Ready", "Deficient", "Ready", "Blocked", [], [],
+            new ProductCharterCheckpoint(1, "Outcome", [], [], [], [], [], new Dictionary<string, string>()),
+            [], "Periodic", "Deterministic", 1, DateTimeOffset.UtcNow)
+        {
+            FulfilledRoleKeys = ["architect"]
+        };
+
+        var replacementGaps = ProductManagerAgent.SelectReplenishmentGaps([architect, quality], prior);
+
+        Assert.Equal("architect", Assert.Single(replacementGaps).RoleKey);
+        Assert.Empty(ProductManagerAgent.SelectReplenishmentGaps([architect, quality], null));
+    }
+
+    [Fact]
     public void ConversationInteraction_WithArchitectReport_UsesPlanningLeadMode()
     {
         var productManagerId = Guid.NewGuid();

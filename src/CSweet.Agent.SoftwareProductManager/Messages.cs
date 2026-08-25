@@ -75,7 +75,10 @@ public sealed record ProductManagerOperatingAssessment(
     string AttentionReason,
     string ExecutionPath,
     long DurationMilliseconds,
-    DateTimeOffset AssessedAt);
+    DateTimeOffset AssessedAt)
+{
+    public IReadOnlyList<string> FulfilledRoleKeys { get; init; } = [];
+}
 
 public sealed record ArchitecturePublicationApproval(
     string ApproverRole,
