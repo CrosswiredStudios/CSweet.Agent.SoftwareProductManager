@@ -135,7 +135,7 @@ public sealed class ProductManagerProfileTests
             "src",
             "CSweet.Agent.SoftwareProductManager",
             "CSweet.Agent.SoftwareProductManager.csproj"));
-        Assert.Contains("CSweet.Agent.SDK\" Version=\"3.16.1", project, StringComparison.Ordinal);
+        Assert.Contains("CSweet.Agent.SDK\" Version=\"3.17.0", project, StringComparison.Ordinal);
         Assert.Contains("<ProjectReference", project, StringComparison.Ordinal);
         Assert.Contains($"<Version>{ProductManagerProfile.Version}</Version>", project, StringComparison.Ordinal);
     }
@@ -1369,6 +1369,86 @@ Facts vs. inference: the pattern catalog says we should validate first. The stru
         Assert.NotNull(decision);
         Assert.Equal("approved", decision!.Decision);
         Assert.Equal(digest, decision.DesignDigest);
+        Assert.Equal(ArchitecturePlanningStages.Stories, decision.NextDirective!.Stage);
+        Assert.Equal(digest, decision.NextDirective.ApprovedDesignDigest);
+    }
+
+    [Fact]
+    public async Task Coordination_AnswersArchitectClarificationsAndReissuesManagerDirective()
+    {
+        var productManagerId = Guid.NewGuid();
+        var architectId = Guid.NewGuid();
+        var boardId = Guid.NewGuid();
+        var columnId = Guid.NewGuid();
+        var sessionId = Guid.NewGuid();
+        var planKey = $"coordination-{sessionId:N}";
+        var board = new WorkBoardSummary(
+            boardId, "Product Delivery", "Approved board", false, false, 5, [])
+        { ManagerOrganizationUserId = productManagerId };
+        var epics = new[]
+        {
+            new WorkItem(Guid.NewGuid(), columnId, null, null, WorkItemKinds.Epic,
+                "[EPIC-01] Product Delivery", "Outcome", WorkStatuses.Backlog,
+                WorkPriorities.High, null, 1, 1, null),
+            new WorkItem(Guid.NewGuid(), columnId, null, null, WorkItemKinds.Epic,
+                "[EPIC-02] Product Delivery Validation", "Evidence", WorkStatuses.Backlog,
+                WorkPriorities.High, null, 2, 1, null)
+        };
+        var brief = new IncrementalProductBrief(
+            boardId, planKey, "Ship a browser game", ["Players can complete one race"],
+            ["The race completes in a current desktop browser"],
+            new IncrementalEpic("EPIC-01", "Product Delivery", "Outcome", ["Outcome works"]),
+            ArchitecturePlanningStages.Design)
+        {
+            SourceRevisions = new Dictionary<string, string> { ["board"] = "5" }
+        };
+        var questions = new SoftwareArchitectureClarificationRequest(
+            planKey, ArchitecturePlanningStages.Design, "EPIC-01",
+            [
+                new("primary-workflow", "What exact workflow is required?", "Defines boundaries.", "product-scope"),
+                new("target-platform", "What platform is required?", "Defines runtime.", "platform"),
+                new("release-boundary", "What is outside v1?", "Bounds scope.", "product-scope")
+            ], brief.SourceRevisions);
+        var questionDigest = new string('b', 64);
+        var runtime = new AgentTestRuntime()
+            .RegisterCapability<WorkBoardListRequest, IReadOnlyList<WorkBoardSummary>>(
+                WorkBoardCapabilities.Read, (_, _) => Task.FromResult<IReadOnlyList<WorkBoardSummary>>([board]))
+            .RegisterCapability<WorkBoardReference, WorkBoardDetail>(
+                WorkItemCapabilities.Read, (_, _) => Task.FromResult(new WorkBoardDetail(
+                    board, [new WorkBoardColumn(columnId, "Backlog", "Backlog", 1, "Pull", null)], epics)));
+        var self = new AgentCoordinationParticipant(
+            productManagerId, Guid.NewGuid(), "Product Manager", "Software Product Manager");
+        var architect = new AgentCoordinationParticipant(
+            architectId, Guid.NewGuid(), "Architect", "Software Architect");
+        var briefArtifact = new AgentCoordinationArtifact(
+            IncrementalPlanningArtifactTypes.ArchitectureBrief, "2.1", $"{planKey}:brief", 0, true,
+            JsonSerializer.SerializeToElement(brief), new string('a', 64));
+        var questionArtifact = new AgentCoordinationArtifact(
+            IncrementalPlanningArtifactTypes.QuestionV2, "2.0", $"{planKey}:questions", 0, true,
+            JsonSerializer.SerializeToElement(questions), questionDigest);
+        var request = new AgentCoordinationTurnRequest(
+            sessionId, 2, 2, "Product planning", "Ship a browser game", ["One race completes"],
+            self, architect, false,
+            [
+                new AgentCoordinationTurn(Guid.NewGuid(), 0, productManagerId,
+                    AgentCoordinationDispositions.Continue, "Design the approved scope.", DateTimeOffset.UtcNow, briefArtifact),
+                new AgentCoordinationTurn(Guid.NewGuid(), 1, architectId,
+                    AgentCoordinationDispositions.Continue, "Three product decisions are required.", DateTimeOffset.UtcNow, questionArtifact)
+            ]);
+
+        var result = await new ProductManagerAgent(
+            NullLogger<ProductManagerAgent>.Instance,
+            new ProductManagerOrchestrator(NullLogger<ProductManagerOrchestrator>.Instance))
+            .HandleCoordinationTurnAsync(request, runtime.CreateContext(), CancellationToken.None);
+
+        Assert.Equal(AgentCoordinationDispositions.Continue, result.Disposition);
+        Assert.Equal(IncrementalPlanningArtifactTypes.ArchitectureBrief, result.Artifact!.Type);
+        var answered = result.Artifact.Payload.Deserialize<IncrementalProductBrief>(
+            new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        Assert.NotNull(answered);
+        Assert.Equal(questionDigest, answered!.RespondsToArtifactDigest);
+        Assert.Equal(3, answered.ProductDecisions.Count);
+        Assert.Contains(answered.ProductDecisions, decision => decision.QuestionId == "primary-workflow");
     }
 
     [Fact]

@@ -1,7 +1,7 @@
 # C-Sweet Software Product Manager
 
-First-party Software Product Manager agent for C-Sweet, built on `CSweet.Agent.SDK` 3.16.1 and manifest protocol v2.
-The agent package version is `2.9.2`.
+First-party Software Product Manager agent for C-Sweet, built on `CSweet.Agent.SDK` 3.17.0 and manifest protocol v2.
+The agent package version is `2.10.0`.
 
 The configured-model lifecycle matrix is defined in
 [`evals/product-manager-lifecycle.v1.json`](evals/product-manager-lifecycle.v1.json) and must run
@@ -64,6 +64,12 @@ remain compatible. One PM-owned personal commitment stays Doing through strict b
 All published work remains Backlog and every sprint remains Planned. Only a separate PM-owned
 sprint-readiness commitment may later preflight and explicitly start one eligible sprint.
 
+The PM leads every planning continuation. Its brief is a typed directive; the Architect must either
+deliver the requested design, Story, or Task artifact or return a typed clarification batch. The PM
+answers product decisions within its mandate and reissues the directive linked to that question
+digest. Exact-digest architecture approval embeds the next Story directive, and malformed or
+text-only continuations are recovered by deterministically reconstructing the next missing stage.
+
 An explicit direct message from the active Software Architect only wakes the durable planning
 commitment. The commitment reconciles the board, transcript, roster, bindings, and authoritative
 product decisions and advances the next missing planning stage until the complete backlog verifies
@@ -88,7 +94,7 @@ dotnet build CSweet.Agent.SoftwareProductManager.slnx
 dotnet test CSweet.Agent.SoftwareProductManager.slnx
 ```
 
-Requirements are .NET 10, `CSweet.Agent.SDK` 3.16.1, `CSweet.Memory`, an approved protocol-v2 installation, an active managing employee, and the grants in [GRANTS.md](GRANTS.md).
+Requirements are .NET 10, `CSweet.Agent.SDK` 3.17.0, `CSweet.Memory`, an approved protocol-v2 installation, an active managing employee, and the grants in [GRANTS.md](GRANTS.md).
 
 ## SDK 1.1.1 authoring contract
 

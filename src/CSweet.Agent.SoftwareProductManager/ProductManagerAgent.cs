@@ -1011,14 +1011,6 @@ Keep all tickets in Backlog and leave dates, estimates, repository details, and 
                 $"Planning remains blocked after two hours, so I escalated it through the reporting chain. {escalation.Message}",
                 $"planning-escalation-notice:{teamId:N}:{session.Id:N}", cancellationToken);
         }
-        else if (architectOwesTurn && now - session.UpdatedAt >= CoworkerFollowUpDelay)
-        {
-            _ = await context.Platform.Communication.SendMessageAsync(
-                directId,
-                "Quick follow-up on our planning session: please send the next focused question or decomposition update when ready.",
-                $"planning-follow-up:{teamId:N}:{session.Id:N}", cancellationToken);
-        }
-
         return PersonalTodoResult.WaitingUntil(
             now.Add(InternalReviewDelay),
             architectOwesTurn
@@ -1483,7 +1475,7 @@ Keep all tickets in Backlog and leave dates, estimates, repository details, and 
     private static AgentCoordinationArtifactSubmission CreateBriefArtifact(IncrementalProductBrief brief) =>
         new(
             IncrementalPlanningArtifactTypes.ArchitectureBrief,
-            "2.0",
+            "2.1",
             $"{brief.PlanKey}:{brief.Epic.Key}:{brief.Stage}:{brief.Story?.Key ?? "epic"}",
             brief.PageOrdinal,
             true,
@@ -1529,6 +1521,7 @@ Keep all tickets in Backlog and leave dates, estimates, repository details, and 
         cancellationToken.ThrowIfCancellationRequested();
         await WakePlanningCommitmentAsync(null, context, cancellationToken);
         var latest = request.Transcript.OrderByDescending(x => x.Ordinal).FirstOrDefault();
+        var transcript = new AgentCoordinationTranscript(request.Transcript);
         if (request.IsFinalization)
             return AgentCoordinationTurnResult.Completed(
                 $"Product collaboration finalized. {latest?.Content ?? request.Objective}");
@@ -1545,7 +1538,8 @@ Keep all tickets in Backlog and leave dates, estimates, repository details, and 
             throw new InvalidOperationException("Exactly one active PM-managed planning board is required.");
 
         var seedBrief = request.Transcript
-            .OrderBy(x => x.Ordinal)
+            .Where(x => x.SpeakerOrganizationUserId == request.Self.OrganizationUserId)
+            .OrderByDescending(x => x.Ordinal)
             .Select(x => x.Artifact)
             .Where(x => x is not null &&
                 (string.Equals(x.Type, IncrementalPlanningArtifactTypes.ProductBrief, StringComparison.Ordinal) ||
@@ -1615,6 +1609,20 @@ Keep all tickets in Backlog and leave dates, estimates, repository details, and 
             var rationale = decision == "approved"
                 ? $"The design is complete, traces the approved requirements, and its impact summary contains {proposal.ImpactSummary.Count} item(s)."
                 : $"Resolve missing or blocked design content: {string.Join(", ", missing)}{(blocking ? ", blockingQuestions" : string.Empty)}.";
+            var nextDirective = new IncrementalProductBrief(
+                board.Id, planKey, productGoal, requirements, acceptance,
+                epics[0].Epic,
+                decision == "approved" ? ArchitecturePlanningStages.Stories : ArchitecturePlanningStages.Design)
+            {
+                ApprovedDesignDigest = decision == "approved" ? artifact.Digest : null,
+                DesignRevision = decision == "approved" ? proposal.Revision : proposal.Revision + 1,
+                Constraints = decision == "approved"
+                    ? seedBrief?.Constraints ?? []
+                    : (seedBrief?.Constraints ?? []).Append($"PM revision request: {rationale}").ToArray(),
+                NonGoals = seedBrief?.NonGoals ?? [],
+                ProductDecisions = seedBrief?.ProductDecisions ?? [],
+                SourceRevisions = seedBrief?.SourceRevisions ?? new Dictionary<string, string>()
+            };
             return AgentCoordinationTurnResult.Continue(
                 decision == "approved"
                     ? "I approved the exact technical design digest. Continue with design-bound Story proposals."
@@ -1623,14 +1631,46 @@ Keep all tickets in Backlog and leave dates, estimates, repository details, and 
                     IncrementalPlanningArtifactTypes.ArchitectureDecision, "1.0",
                     $"{planKey}:design-decision", proposal.Revision, true,
                     JsonSerializer.SerializeToElement(new ProductArchitectureDecision(
-                        planKey, artifact.Digest, decision, rationale, proposal.Revision), IncrementalJsonOptions)));
+                        planKey, artifact.Digest, decision, rationale, proposal.Revision)
+                    {
+                        NextDirective = nextDirective
+                    }, IncrementalJsonOptions)));
         }
 
-        if (string.Equals(artifact.Type, IncrementalPlanningArtifactTypes.Question, StringComparison.Ordinal))
+        if (string.Equals(artifact.Type, IncrementalPlanningArtifactTypes.Question, StringComparison.Ordinal) ||
+            string.Equals(artifact.Type, IncrementalPlanningArtifactTypes.QuestionV2, StringComparison.Ordinal))
         {
-            var question = artifact.Payload.Deserialize<IncrementalArchitectureQuestion>(IncrementalJsonOptions);
-            return AgentCoordinationTurnResult.Blocked(
-                $"Focused product question: {question?.Question ?? latest.Content}");
+            var questions = string.Equals(artifact.Type, IncrementalPlanningArtifactTypes.QuestionV2, StringComparison.Ordinal)
+                ? artifact.Payload.Deserialize<SoftwareArchitectureClarificationRequest>(IncrementalJsonOptions)?.Questions ?? []
+                : artifact.Payload.Deserialize<IncrementalArchitectureQuestion>(IncrementalJsonOptions) is { } legacy
+                    ? [new ArchitectureClarificationQuestion(
+                        NormalizeArtifactKey(legacy.Question), legacy.Question,
+                        "The Architect identified a missing product decision.", "product-scope")]
+                    : [];
+            if (questions.Count == 0)
+                throw new InvalidOperationException("The architecture clarification artifact is empty.");
+            var directiveTurn = transcript.LatestArtifactTurn(
+                [IncrementalPlanningArtifactTypes.ArchitectureBrief, IncrementalPlanningArtifactTypes.ProductBrief],
+                request.Self.OrganizationUserId);
+            var current = directiveTurn is null
+                ? new IncrementalProductBrief(
+                    board.Id, planKey, productGoal, requirements, acceptance,
+                    epics[0].Epic, ArchitecturePlanningStages.Design)
+                : transcript.DeserializeArtifact<IncrementalProductBrief>(directiveTurn, IncrementalJsonOptions);
+            var decisions = questions.Select(question => DecideProductClarification(
+                question, current, artifact.Digest)).ToArray();
+            var answered = current with
+            {
+                ProductDecisions = current.ProductDecisions
+                    .Where(existing => decisions.All(decision =>
+                        !string.Equals(existing.QuestionId, decision.QuestionId, StringComparison.OrdinalIgnoreCase)))
+                    .Concat(decisions).ToArray(),
+                RespondsToArtifactDigest = artifact.Digest,
+                SourceRevisions = current.SourceRevisions
+            };
+            return AgentCoordinationTurnResult.Continue(
+                $"I resolved {decisions.Length} product decision(s) within the PM mandate and reissued the {answered.Stage} directive.",
+                CreateBriefArtifact(answered));
         }
 
         if (string.Equals(artifact.Type, IncrementalPlanningArtifactTypes.StoryProposal, StringComparison.Ordinal) ||
@@ -1764,9 +1804,105 @@ Keep all tickets in Backlog and leave dates, estimates, repository details, and 
                 $"Backlog planning is complete. {verification.Summary} All tickets remain Backlog work and all sprints remain Planned.");
         }
 
+        var recovery = BuildExpectedPlanningDirective(
+            board.Id, planKey, productGoal, requirements, acceptance,
+            epics, approvedDesignDigest, seedBrief, request);
         return AgentCoordinationTurnResult.Continue(
-            "The last turn did not include the expected structured planning artifact. Please return the requested Story or Task proposal artifact.");
+            $"I restored the manager-owned planning stage and reissued the {recovery.Stage} directive.",
+            CreateBriefArtifact(recovery));
     }
+
+    private static ProductPlanningDecision DecideProductClarification(
+        ArchitectureClarificationQuestion question,
+        IncrementalProductBrief brief,
+        string sourceDigest)
+    {
+        var answer = question.Id switch
+        {
+            "primary-workflow" =>
+                $"The first release must deliver one complete end-to-end user workflow that demonstrably satisfies: {brief.ProductGoal}. " +
+                "Use the smallest coherent vertical slice and exclude optional secondary modes.",
+            "target-platform" => ContainsAny(brief.ProductGoal, "browser", "web")
+                ? "Target current evergreen desktop browsers first. Treat mobile and offline operation as out of scope unless an approved requirement explicitly includes them."
+                : $"Target only the runtime platforms explicitly required by the approved outcome: {brief.ProductGoal}.",
+            "release-boundary" =>
+                "The first release includes the primary workflow and only the content required to prove its acceptance criteria. " +
+                "Secondary modes, user-generated content, broad customization, and speculative integrations are out of scope.",
+            _ =>
+                $"Use the narrowest reversible product interpretation that satisfies '{brief.ProductGoal}' and the approved acceptance criteria. " +
+                $"For this decision, the PM direction is: {question.Question} must be resolved without expanding first-release scope."
+        };
+        return new ProductPlanningDecision(
+            question.Id, answer, $"PM decision for {question.DecisionDomain}; source clarification {sourceDigest}.",
+            brief.SourceRevisions);
+    }
+
+    private static IncrementalProductBrief BuildExpectedPlanningDirective(
+        Guid boardId,
+        string planKey,
+        string productGoal,
+        IReadOnlyList<string> requirements,
+        IReadOnlyList<string> acceptance,
+        IReadOnlyList<ManagedIncrementalEpic> epics,
+        string? approvedDesignDigest,
+        IncrementalProductBrief? seedBrief,
+        AgentCoordinationTurnRequest request)
+    {
+        var common = new IncrementalProductBrief(
+            boardId, planKey, productGoal, requirements, acceptance,
+            epics[0].Epic, ArchitecturePlanningStages.Design)
+        {
+            Constraints = seedBrief?.Constraints ?? [],
+            NonGoals = seedBrief?.NonGoals ?? [],
+            ProductDecisions = seedBrief?.ProductDecisions ?? [],
+            SourceRevisions = seedBrief?.SourceRevisions ?? new Dictionary<string, string>()
+        };
+        if (string.IsNullOrWhiteSpace(approvedDesignDigest))
+            return common;
+
+        var storyProposals = ReadStoryProposals(request).ToArray();
+        var proposedEpicKeys = storyProposals.Select(x => x.EpicKey)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var nextEpic = epics.FirstOrDefault(x => !proposedEpicKeys.Contains(x.Epic.Key));
+        if (nextEpic is not null)
+            return common with
+            {
+                Epic = nextEpic.Epic,
+                Stage = ArchitecturePlanningStages.Stories,
+                ApprovedDesignDigest = approvedDesignDigest
+            };
+
+        var completedTaskStories = request.Transcript
+            .Where(turn => turn.Artifact is { IsFinalPage: true } artifact &&
+                           (artifact.Type == IncrementalPlanningArtifactTypes.TaskProposal ||
+                            artifact.Type == IncrementalPlanningArtifactTypes.TaskProposalV2))
+            .Select(turn => turn.Artifact!.Payload.Deserialize<IncrementalTaskProposal>(IncrementalJsonOptions))
+            .Where(proposal => proposal is not null)
+            .Select(proposal => proposal!.StoryKey)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var proposal in storyProposals)
+        {
+            var story = proposal.Stories.FirstOrDefault(candidate => !completedTaskStories.Contains(candidate.Key));
+            if (story is null) continue;
+            var epic = epics.Single(x => string.Equals(x.Epic.Key, proposal.EpicKey, StringComparison.OrdinalIgnoreCase));
+            return common with
+            {
+                Epic = epic.Epic,
+                Story = story,
+                Stage = ArchitecturePlanningStages.Tasks,
+                ApprovedDesignDigest = approvedDesignDigest
+            };
+        }
+
+        return common with
+        {
+            Stage = ArchitecturePlanningStages.Stories,
+            ApprovedDesignDigest = approvedDesignDigest
+        };
+    }
+
+    private static bool ContainsAny(string value, params string[] candidates) =>
+        candidates.Any(candidate => value.Contains(candidate, StringComparison.OrdinalIgnoreCase));
 
     private async Task<AgentCoordinationTurnResult> HandleLegacyCoordinationTurnAsync(
         AgentCoordinationTurnRequest request,
