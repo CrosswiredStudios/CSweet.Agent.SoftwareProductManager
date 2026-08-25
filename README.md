@@ -1,7 +1,7 @@
 # C-Sweet Software Product Manager
 
-First-party Software Product Manager agent for C-Sweet, built on `CSweet.Agent.SDK` 3.17.0 and manifest protocol v2.
-The agent package version is `2.10.0`.
+First-party Software Product Manager agent for C-Sweet, built on `CSweet.Agent.SDK` 3.18.0 and manifest protocol v2.
+The agent package version is `2.11.0`.
 
 The configured-model lifecycle matrix is defined in
 [`evals/product-manager-lifecycle.v1.json`](evals/product-manager-lifecycle.v1.json) and must run
@@ -70,6 +70,12 @@ answers product decisions within its mandate and reissues the directive linked t
 digest. Exact-digest architecture approval embeds the next Story directive, and malformed or
 text-only continuations are recovered by deterministically reconstructing the next missing stage.
 
+The model prompt uses the SDK's authenticated interaction policies. Architect conversations use
+`lead.v1`; conversations with the PM's authoritative manager use `supporting-specialist.v1`;
+other reports use `lead.v1`; and unclassified authorized collaborators use `peer.v1`. These modes
+govern conversational progression only and do not alter grants, approval boundaries, or specialist
+decision ownership.
+
 An explicit direct message from the active Software Architect only wakes the durable planning
 commitment. The commitment reconciles the board, transcript, roster, bindings, and authoritative
 product decisions and advances the next missing planning stage until the complete backlog verifies
@@ -94,7 +100,7 @@ dotnet build CSweet.Agent.SoftwareProductManager.slnx
 dotnet test CSweet.Agent.SoftwareProductManager.slnx
 ```
 
-Requirements are .NET 10, `CSweet.Agent.SDK` 3.17.0, `CSweet.Memory`, an approved protocol-v2 installation, an active managing employee, and the grants in [GRANTS.md](GRANTS.md).
+Requirements are .NET 10, `CSweet.Agent.SDK` 3.18.0, `CSweet.Memory`, an approved protocol-v2 installation, an active managing employee, and the grants in [GRANTS.md](GRANTS.md).
 
 ## SDK 1.1.1 authoring contract
 

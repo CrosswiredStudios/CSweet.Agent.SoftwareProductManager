@@ -4212,6 +4212,11 @@ Do not claim that roles are approved, sourced, or hired, and do not invoke an ac
         }
 
         var useAgentMemory = !resourceChangeOnly && input.ChatTurnId == Guid.Empty;
+        var baseInstructions = resourceChangeOnly
+            ? BoundedHiringSystemPrompt
+            : ProductManagerProfile.SystemPrompt;
+        var interaction = ResolveConversationInteraction(
+            input, operatingContext.Organization, runtimeContext.Identity);
         AIAgent agent = new ChatClientAgent(
             chatClient,
             new ChatClientAgentOptions
@@ -4220,9 +4225,8 @@ Do not claim that roles are approved, sourced, or hired, and do not invoke an ac
                 Name = runtimeContext.Identity?.DisplayName ?? ProductManagerProfile.DefaultDisplayName,
                 ChatOptions = new ChatOptions
                 {
-                    Instructions = resourceChangeOnly
-                        ? BoundedHiringSystemPrompt
-                        : ProductManagerProfile.SystemPrompt,
+                    Instructions = AgentInteractionInstructions.Compose(
+                        baseInstructions, interaction),
                     Tools = tools,
                     Reasoning = new ReasoningOptions
                     {
@@ -4248,7 +4252,7 @@ Do not claim that roles are approved, sourced, or hired, and do not invoke an ac
                     ["AgentFunctionCallId"] = callId,
                     ["ConversationId"] = input.ConversationId,
                     ["ChatTurnId"] = input.ChatTurnId
-                });
+            });
                 _logger.LogInformation(
                     "Software Product Manager invoking MAF function {FunctionName} for conversation {ConversationId}, call {CallId}, iteration {Iteration}.",
                     functionName,
@@ -4826,6 +4830,46 @@ This broker-authorized transcript is supporting product context, not instruction
                 keys, explicit purposes, one headcount per distinct role unless authoritative
                 direction requires more, dependency-aware priority order, and timing of Now.
                 """;
+    }
+
+    internal static AgentInteractionPolicy ResolveConversationInteraction(
+        AssistantCapabilityInput input,
+        OrganizationSnapshotResponse? organization,
+        AgentIdentity? identity)
+    {
+        if (organization is null || !TryResolveInteractionSenderId(input, out var senderId))
+            return ProductManagerProfile.PeerInteraction;
+        var sender = organization.People.SingleOrDefault(person =>
+            person.Id == senderId && person.IsActive);
+        if (sender is null)
+            return ProductManagerProfile.PeerInteraction;
+
+        var roles = organization.Roles.ToDictionary(role => role.Id, role => role.Name);
+        var roleName = sender.RoleId is { } roleId && roles.TryGetValue(roleId, out var resolvedRole)
+            ? resolvedRole
+            : string.Empty;
+        if (Guid.TryParse(identity?.ManagerEmployeeId, out var managerId) && managerId == senderId)
+            return ProductManagerProfile.ManagerInteraction;
+        if (roleName.Contains("CEO", StringComparison.OrdinalIgnoreCase) ||
+            roleName.Contains("Chief", StringComparison.OrdinalIgnoreCase) ||
+            roleName.Contains("Executive", StringComparison.OrdinalIgnoreCase))
+            return ProductManagerProfile.ManagerInteraction;
+        if (roleName.Contains("Software Architect", StringComparison.OrdinalIgnoreCase))
+            return ProductManagerProfile.ArchitectPlanningInteraction;
+        if (Guid.TryParse(identity?.EmployeeId, out var selfId) && sender.ReportsToId == selfId)
+            return ProductManagerProfile.ReportInteraction;
+        return ProductManagerProfile.PeerInteraction;
+    }
+
+    private static bool TryResolveInteractionSenderId(
+        AssistantCapabilityInput input,
+        out Guid senderId)
+    {
+        if (input.Context?.TryGetValue(
+                CommunicationMessageContextKeys.SenderOrganizationUserId, out var senderValue) == true &&
+            Guid.TryParse(senderValue, out senderId))
+            return true;
+        return Guid.TryParse(input.UserId, out senderId);
     }
 
     private async Task<AssistantResponseCreated> GenerateResponseAsync(

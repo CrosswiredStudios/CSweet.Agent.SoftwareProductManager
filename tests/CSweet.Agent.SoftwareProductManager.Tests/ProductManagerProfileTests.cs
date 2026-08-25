@@ -10,6 +10,31 @@ namespace CSweet.Agent.SoftwareProductManager.Tests;
 public sealed class ProductManagerProfileTests
 {
     [Fact]
+    public void ConversationInteraction_WithArchitectReport_UsesPlanningLeadMode()
+    {
+        var productManagerId = Guid.NewGuid();
+        var architectId = Guid.NewGuid();
+        var roleId = Guid.NewGuid();
+        var organization = new OrganizationSnapshotResponse(
+            Guid.NewGuid(), "Active",
+            [new OrganizationPerson(architectId, "Architect", "Agent", roleId, productManagerId, Guid.NewGuid(), true)],
+            [new OrganizationRole(roleId, "Software Architect", "Owns architecture.", "[]")],
+            [], [], [], DateTimeOffset.UtcNow);
+        var input = new AssistantCapabilityInput(
+            Guid.NewGuid(), Guid.NewGuid().ToString("D"), "I have a design question.", null,
+            architectId.ToString("D"));
+        var identity = new AgentIdentity(
+            productManagerId.ToString("D"), "PM", null, "Software Product Manager", null, [], null,
+            Guid.NewGuid().ToString("D"), "CEO");
+
+        var policy = ProductManagerAgent.ResolveConversationInteraction(input, organization, identity);
+
+        Assert.Equal(AgentInteractionModes.Lead, policy.Mode);
+        Assert.Equal("product-planning", policy.Purpose);
+        Assert.Equal(AgentInteractionResponseContracts.DecisionAndNextDirective, policy.ExpectedResponse);
+    }
+
+    [Fact]
     public void TeamName_DerivesConciseProductIdentityFromLongGoal()
     {
         var name = ProductManagerAgent.DeriveConciseTeamName(
@@ -135,7 +160,7 @@ public sealed class ProductManagerProfileTests
             "src",
             "CSweet.Agent.SoftwareProductManager",
             "CSweet.Agent.SoftwareProductManager.csproj"));
-        Assert.Contains("CSweet.Agent.SDK\" Version=\"3.17.0", project, StringComparison.Ordinal);
+        Assert.Contains("CSweet.Agent.SDK\" Version=\"3.18.0", project, StringComparison.Ordinal);
         Assert.Contains("<ProjectReference", project, StringComparison.Ordinal);
         Assert.Contains($"<Version>{ProductManagerProfile.Version}</Version>", project, StringComparison.Ordinal);
     }

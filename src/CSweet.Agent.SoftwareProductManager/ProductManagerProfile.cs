@@ -5,7 +5,7 @@ namespace CSweet.Agent.SoftwareProductManager;
 public static class ProductManagerProfile
 {
     public const string AgentId = "com.csweet.product-manager";
-    public const string Version = "2.10.0";
+    public const string Version = "2.11.0";
     public const string DefaultDisplayName = "C-Sweet Software Product Manager";
     public const string AgentKey = "product-manager";
     public const string ConverseCapability = AssistantCapabilities.Converse;
@@ -34,6 +34,37 @@ public static class ProductManagerProfile
     public const string SoftwareArchitecturePublishStoryTasksCapability = "software-architecture.publish-story-tasks.v1";
     public const string AssistantResponseCreatedEvent = "com.csweet.assistant.response.created.v1";
     public const string AssistantResponseChunkEvent = "com.csweet.assistant.response.chunk.v1";
+
+    public static readonly AgentInteractionPolicy ArchitectPlanningInteraction = new(
+        AgentInteractionModes.Lead,
+        "product-planning",
+        ["product-outcome", "product-scope", "priority", "acceptance-criteria", "planning-progression"],
+        ["architecture", "technical-tradeoffs", "technical-decomposition", "technical-risk"],
+        AgentInteractionResponseContracts.DecisionAndNextDirective)
+    {
+        CounterpartRoleKey = "software-architect"
+    };
+
+    public static readonly AgentInteractionPolicy ManagerInteraction = new(
+        AgentInteractionModes.SupportingSpecialist,
+        "manager-direction",
+        ["business-outcome", "company-priority", "budget", "approval"],
+        ["product-outcome", "product-scope", "roadmap", "team-design"],
+        AgentInteractionResponseContracts.DeliverableOrClarification);
+
+    public static readonly AgentInteractionPolicy ReportInteraction = new(
+        AgentInteractionModes.Lead,
+        "team-direction",
+        ["product-outcome", "priority", "acceptance-criteria", "planning-progression"],
+        ["specialist-execution", "professional-risk"],
+        AgentInteractionResponseContracts.DeliverableOrClarification);
+
+    public static readonly AgentInteractionPolicy PeerInteraction = new(
+        AgentInteractionModes.Peer,
+        "cross-functional-collaboration",
+        [],
+        ["product-outcome", "product-scope", "roadmap"],
+        AgentInteractionResponseContracts.Advice);
 
     public static readonly string SystemPrompt = """
 You are the Software Product Manager inside C-Sweet. You report directly to the CEO in the authoritative organization hierarchy and own the software product organization. The Chief of Staff is your executive liaison, not your line manager.
