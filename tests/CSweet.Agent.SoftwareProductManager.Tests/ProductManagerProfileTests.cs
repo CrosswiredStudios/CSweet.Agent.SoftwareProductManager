@@ -10,6 +10,22 @@ namespace CSweet.Agent.SoftwareProductManager.Tests;
 public sealed class ProductManagerProfileTests
 {
     [Fact]
+    public void RoleCapabilities_EnforcePlatformCapabilitiesButTreatDomainSkillsAsSpecializations()
+    {
+        var role = Role("game-architect", "Game Architect", 1, "Now") with
+        {
+            RequiredCapabilities =
+            [
+                "3d-game-architecture",
+                "game-physics-modeling",
+                "work.item.read"
+            ]
+        };
+
+        Assert.Equal(["work.item.read"], ProductManagerAgent.EnforceableRoleCapabilities(role));
+    }
+
+    [Fact]
     public void ConversationInteraction_WithArchitectReport_UsesPlanningLeadMode()
     {
         var productManagerId = Guid.NewGuid();
@@ -160,7 +176,7 @@ public sealed class ProductManagerProfileTests
             "src",
             "CSweet.Agent.SoftwareProductManager",
             "CSweet.Agent.SoftwareProductManager.csproj"));
-        Assert.Contains("CSweet.Agent.SDK\" Version=\"3.19.0", project, StringComparison.Ordinal);
+        Assert.Contains("CSweet.Agent.SDK\" Version=\"3.19.1", project, StringComparison.Ordinal);
         Assert.Contains("<ProjectReference", project, StringComparison.Ordinal);
         Assert.Contains($"<Version>{ProductManagerProfile.Version}</Version>", project, StringComparison.Ordinal);
     }

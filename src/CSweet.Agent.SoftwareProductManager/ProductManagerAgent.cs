@@ -324,7 +324,7 @@ or denied. Otherwise perform the task and return a concise completion summary.
         }
     }
 
-    private static IReadOnlyList<ProductManagerRoleHealth> AssessApprovedRoles(
+    internal static IReadOnlyList<ProductManagerRoleHealth> AssessApprovedRoles(
         ResourceChangeRequestResponse approved,
         AgentTeamContext team,
         OrganizationSnapshotResponse? organization)
@@ -335,6 +335,7 @@ or denied. Otherwise perform the task and return a concise completion summary.
             .ThenBy(x => x.RoleKey, StringComparer.Ordinal)
             .Select(role =>
             {
+                var enforceableCapabilities = EnforceableRoleCapabilities(role);
                 var candidates = team.Members.Where(member => RoleTaxonomy.CanFill(role, member)).ToList();
                 var expectedManagerIds = role.ReportsToRoleKey is null
                     ? []
@@ -350,7 +351,7 @@ or denied. Otherwise perform the task and return a concise completion summary.
                         return false;
                     if (role.HumanRequired && !member.EmployeeType.Equals("Human", StringComparison.OrdinalIgnoreCase))
                         return false;
-                    if (role.RequiredCapabilities.Any(required =>
+                    if (enforceableCapabilities.Any(required =>
                         !member.EffectiveCapabilities.Contains(required, StringComparer.Ordinal)))
                         return false;
                     if (!Guid.TryParse(member.EmployeeId, out var employeeId) || !people.TryGetValue(employeeId, out var person) || !person.IsActive)
@@ -369,7 +370,7 @@ or denied. Otherwise perform the task and return a concise completion summary.
                 var evidence = new List<string>();
                 if (candidates.Count < role.Headcount) evidence.Add("approved role headcount is not filled on the team");
                 if (candidates.Any(x => !x.IsAvailable)) evidence.Add("assigned runtime is unavailable");
-                if (candidates.Any(x => role.RequiredCapabilities.Any(required =>
+                if (candidates.Any(x => enforceableCapabilities.Any(required =>
                         !x.EffectiveCapabilities.Contains(required, StringComparer.Ordinal))))
                     evidence.Add("required capability or effective grant is missing");
                 if (role.HumanRequired && candidates.Any(x => !x.EmployeeType.Equals("Human", StringComparison.OrdinalIgnoreCase)))
@@ -385,6 +386,13 @@ or denied. Otherwise perform the task and return a concise completion summary.
                     IsVitalRole(role));
             }).ToList();
     }
+
+    internal static IReadOnlyList<string> EnforceableRoleCapabilities(ResourceChangeRole role) =>
+        role.RequiredCapabilities
+            .Where(capability => capability.Contains('.', StringComparison.Ordinal))
+            .Distinct(StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal)
+            .ToList();
 
     private static bool IsVitalRole(ResourceChangeRole role) =>
         role.RoleCategoryKey is ArchitectRoleCategory or DeveloperRoleCategory or QualityRoleCategory;
@@ -1316,7 +1324,11 @@ Keep all tickets in Backlog and leave dates, estimates, repository details, and 
         (summary.Contains("work.sprint.read", StringComparison.OrdinalIgnoreCase) ||
          summary.Contains("grant or platform capability", StringComparison.OrdinalIgnoreCase) ||
          summary.Contains("runtime or transport", StringComparison.OrdinalIgnoreCase) ||
-         summary.Contains("agent-failure:v1", StringComparison.OrdinalIgnoreCase) ||
+         summary.Contains("retryable=true", StringComparison.OrdinalIgnoreCase) ||
+         summary.Contains("code=runtime.transport", StringComparison.OrdinalIgnoreCase) ||
+         // Compatibility recovery for sessions failed by SDK 3.19.0, which parsed an empty
+         // rate-limit response as invalid JSON before checking the HTTP status.
+         summary.Contains("code=agent.payload_invalid", StringComparison.OrdinalIgnoreCase) ||
          summary.Contains("The agent failed while processing the work item", StringComparison.OrdinalIgnoreCase));
 
     private static bool IsJokeDeliveryTask(PersonalTodoItem item)
