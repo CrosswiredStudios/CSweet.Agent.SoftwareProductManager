@@ -438,6 +438,10 @@ public sealed class ResourceChangeRoutingTests
                         false,
                         null,
                         null)
+                    {
+                        RoleCategoryKey = "software-developer",
+                        PreferredSpecializationKeys = ["realtime-3d"]
+                    }
                 ],
                 omitOptionalCollections ? null : ["Free agents are acceptable."],
                 omitOptionalCollections ? null : ["No paid workforce budget."],
@@ -464,7 +468,10 @@ public sealed class ResourceChangeRoutingTests
                 ["product-delivery"],
                 false,
                 reportsToOrganizationUserId,
-                reportsToRoleKey);
+                reportsToRoleKey)
+            {
+                RoleCategoryKey = "general-specialist"
+            };
 
         private static ResourceChangeRequestResponse Response(
             ResourceChangeProposalRequest request,

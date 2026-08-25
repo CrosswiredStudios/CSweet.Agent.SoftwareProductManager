@@ -16,6 +16,9 @@ namespace CSweet.Agent.SoftwareProductManager;
 
 public sealed class ProductManagerAgent : CSweetAgentBase
 {
+    private const string ArchitectRoleCategory = "software-architect";
+    private const string DeveloperRoleCategory = "software-developer";
+    private const string QualityRoleCategory = "software-qa";
     private const string ResourceChangeApprovalToolName = "request_resource_change_approval";
     private const string EnsureSoftwareTeamBoardToolName = "ensure_software_team_board";
     internal const string TerminalResourceChangeChunkKind = "terminal-resource-change";
@@ -28,7 +31,9 @@ public sealed class ProductManagerAgent : CSweetAgentBase
         manager direction. Design the smallest cross-functional product team that can deliver the
         stated outcome safely. Call request_resource_change_approval exactly once. Do not write a
         narrative response and do not claim approval. Include the complete desired role snapshot in
-        that call. Roles reporting directly to the Product Manager must omit reportsToRoleKey.
+        that call. Give every slot a stable high-level roleCategoryKey and put optional domain
+        preferences only in preferredSpecializationKeys. Roles reporting directly to the Product
+        Manager must omit reportsToRoleKey.
         """;
     private static readonly TimeSpan InternalReviewDelay = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan CoworkerFollowUpDelay = TimeSpan.FromMinutes(30);
@@ -227,7 +232,8 @@ or denied. Otherwise perform the task and return a concise completion summary.
                             : "role-missing");
 
                     var architectReady = roleHealth.Any(x => x.Vital &&
-                        IsArchitectRole(x.RoleKey, x.RoleTitle) && x.EffectiveHeadcount >= x.DesiredHeadcount);
+                        x.RoleCategoryKey == ArchitectRoleCategory &&
+                        x.EffectiveHeadcount >= x.DesiredHeadcount);
                     if (!architectReady)
                     {
                         conditions.Add("planning-stalled");
@@ -329,17 +335,13 @@ or denied. Otherwise perform the task and return a concise completion summary.
             .ThenBy(x => x.RoleKey, StringComparer.Ordinal)
             .Select(role =>
             {
-                var candidates = team.Members.Where(member =>
-                    NormalizeRoleIdentity(member.TeamRole ?? member.CompanyRole ?? string.Empty) == NormalizeRoleIdentity(role.Title) ||
-                    NormalizeRoleIdentity(member.TeamRole ?? member.CompanyRole ?? string.Empty) == NormalizeRoleIdentity(role.RoleKey)).ToList();
+                var candidates = team.Members.Where(member => RoleTaxonomy.CanFill(role, member)).ToList();
                 var expectedManagerIds = role.ReportsToRoleKey is null
                     ? []
                     : team.Members.Where(member =>
                     {
                         var parent = approved.Roles.SingleOrDefault(x => x.RoleKey == role.ReportsToRoleKey);
-                        return parent is not null &&
-                            (NormalizeRoleIdentity(member.TeamRole ?? member.CompanyRole ?? string.Empty) == NormalizeRoleIdentity(parent.Title) ||
-                             NormalizeRoleIdentity(member.TeamRole ?? member.CompanyRole ?? string.Empty) == NormalizeRoleIdentity(parent.RoleKey));
+                        return parent is not null && RoleTaxonomy.CanFill(parent, member);
                     }).Select(x => Guid.TryParse(x.EmployeeId, out var id) ? id : Guid.Empty)
                     .Where(x => x != Guid.Empty).ToHashSet();
                 var eligible = candidates.Where(member =>
@@ -358,10 +360,9 @@ or denied. Otherwise perform the task and return a concise completion summary.
                         return false;
                     if (role.ReportsToRoleKey is not null && !expectedManagerIds.Contains(person.ReportsToId ?? Guid.Empty))
                         return false;
-                    if ((NormalizeRoleIdentity(role.RoleKey + role.Title).Contains("softwareqa", StringComparison.Ordinal) ||
-                         NormalizeRoleIdentity(role.RoleKey + role.Title).Contains("qualityassurance", StringComparison.Ordinal)) &&
+                    if (role.RoleCategoryKey == QualityRoleCategory &&
                         role.ReportsToRoleKey is not null &&
-                        NormalizeRoleIdentity(role.ReportsToRoleKey).Contains("developer", StringComparison.Ordinal))
+                        approved.Roles.Single(x => x.RoleKey == role.ReportsToRoleKey).RoleCategoryKey == DeveloperRoleCategory)
                         return false;
                     return true;
                 }).ToList();
@@ -379,19 +380,17 @@ or denied. Otherwise perform the task and return a concise completion summary.
                 if (eligible.Count < role.Headcount && evidence.Count == 0)
                     evidence.Add("employee is inactive or outside the authoritative organization assignment");
                 return new ProductManagerRoleHealth(
-                    role.RoleKey, role.Title, role.Headcount, Math.Min(eligible.Count, role.Headcount), evidence,
-                    IsVitalRole(role.RoleKey, role.Title));
+                    role.RoleKey, role.RoleCategoryKey, role.Title, role.Headcount,
+                    Math.Min(eligible.Count, role.Headcount), evidence,
+                    IsVitalRole(role));
             }).ToList();
     }
 
-    private static bool IsVitalRole(string roleKey, string title) =>
-        IsArchitectRole(roleKey, title) ||
-        NormalizeRoleIdentity(roleKey + title).Contains("softwaredeveloper", StringComparison.Ordinal) ||
-        NormalizeRoleIdentity(roleKey + title).Contains("softwareqa", StringComparison.Ordinal) ||
-        NormalizeRoleIdentity(roleKey + title).Contains("qualityassurance", StringComparison.Ordinal);
+    private static bool IsVitalRole(ResourceChangeRole role) =>
+        role.RoleCategoryKey is ArchitectRoleCategory or DeveloperRoleCategory or QualityRoleCategory;
 
-    private static bool IsArchitectRole(string roleKey, string title) =>
-        NormalizeRoleIdentity(roleKey + title).Contains("softwarearchitect", StringComparison.Ordinal);
+    private static bool IsArchitectRole(ResourceChangeRole role) =>
+        role.RoleCategoryKey == ArchitectRoleCategory;
 
     private static async Task<StaffingReplenishmentResponse?> EnsureStaffingReplenishmentAsync(
         ResourceChangeRequestResponse approved,
@@ -836,7 +835,7 @@ or denied. Otherwise perform the task and return a concise completion summary.
             x.AgentInstallationId == installationId && x.IsActive);
         if (self is null)
             return PersonalTodoResult.Blocked("The Product Manager employee identity is unavailable.");
-        var architects = ActiveTeamAgentsForRole(roster.Team, organization!, "Software Architect")
+        var architects = ActiveTeamAgentsForRole(roster.Team, organization!, ArchitectRoleCategory)
             .Where(x => x.ReportsToId == self.Id)
             .ToList();
         if (architects.Count != 1)
@@ -1139,9 +1138,9 @@ Keep all tickets in Backlog and leave dates, estimates, repository details, and 
             rosterTeamId != board.Board.TeamId.Value)
             return "The authoritative team roster does not match the delivery board.";
 
-        var architects = EligibleMembersForRole(roster.Team, organization, "Software Architect");
-        var developers = EligibleMembersForRole(roster.Team, organization, "Software Developer");
-        var quality = EligibleMembersForRole(roster.Team, organization, "Software QA");
+        var architects = EligibleMembersForRole(roster.Team, organization, ArchitectRoleCategory);
+        var developers = EligibleMembersForRole(roster.Team, organization, DeveloperRoleCategory);
+        var quality = EligibleMembersForRole(roster.Team, organization, QualityRoleCategory);
         if (architects.Count == 0 || developers.Count == 0 || quality.Count == 0)
             return "No sprint can start without viable Software Architect, Software Developer, and independent Software QA capacity.";
 
@@ -1248,7 +1247,7 @@ Keep all tickets in Backlog and leave dates, estimates, repository details, and 
     {
         var eligibleIds = team.Members.Where(x =>
                 x.IsAvailable && !x.Presence.Equals("Inactive", StringComparison.OrdinalIgnoreCase) &&
-                NormalizeRoleIdentity(x.TeamRole ?? x.CompanyRole ?? string.Empty) == NormalizeRoleIdentity(role))
+                x.DeclaredRoleKeys.Contains(role, StringComparer.Ordinal))
             .Select(x => Guid.TryParse(x.EmployeeId, out var id) ? id : Guid.Empty)
             .Where(x => x != Guid.Empty)
             .ToHashSet();
@@ -2632,8 +2631,7 @@ Retry now. The ensure_software_team_board tool is required. Use its structured r
         var rosterArchitect = roster.Team.Members.Any(x =>
             Guid.TryParse(x.EmployeeId, out var employeeId) && employeeId == senderId &&
             !x.Presence.Equals("Inactive", StringComparison.OrdinalIgnoreCase) &&
-            NormalizeRoleIdentity(x.TeamRole ?? x.CompanyRole ?? string.Empty) ==
-            NormalizeRoleIdentity("Software Architect"));
+            x.DeclaredRoleKeys.Contains(ArchitectRoleCategory, StringComparer.Ordinal));
         if (self is null || architect?.AgentInstallationId is null || architect.ReportsToId != self.Id || !rosterArchitect)
             return false;
 
@@ -2737,14 +2735,12 @@ Retry now. The ensure_software_team_board tool is required. Use its structured r
             return;
 
         var roster = await ReadCompleteTeamRosterAsync(context, cancellationToken);
-        var coverage = (roster.Team?.RoleCoverage ?? [])
-            .GroupBy(x => NormalizeRoleIdentity(x.Role), StringComparer.Ordinal)
-            .ToDictionary(x => x.Key, x => x.Sum(item => item.Count), StringComparer.Ordinal);
+        var members = roster.Team?.Members ?? [];
         var gaps = request.Roles
             .Select(role => new
             {
                 Role = role,
-                Remaining = Math.Max(0, role.Headcount - coverage.GetValueOrDefault(NormalizeRoleIdentity(role.Title)))
+                Remaining = Math.Max(0, role.Headcount - members.Count(member => RoleTaxonomy.CanFill(role, member)))
             })
             .Where(x => x.Remaining > 0)
             .OrderBy(x => x.Role.Priority)
@@ -2767,8 +2763,8 @@ Retry now. The ensure_software_team_board tool is required. Use its structured r
             content,
             $"hiring-recommendation-fulfilled:{message.EventId:N}:product-manager",
             cancellationToken);
-        var architectCovered = coverage.GetValueOrDefault(
-            NormalizeRoleIdentity("Software Architect")) > 0;
+        var architectCovered = members.Any(member =>
+            member.DeclaredRoleKeys.Contains(ArchitectRoleCategory, StringComparer.Ordinal));
         if (roster.Team is not null && architectCovered)
         {
             _ = await EnsureSoftwareTeamBoardAsync(request, roster.Team, context, cancellationToken);
@@ -2816,8 +2812,7 @@ Retry now. The ensure_software_team_board tool is required. Use its structured r
         var employeeIds = team.Members
             .Where(x => !x.Presence.Equals("Inactive", StringComparison.OrdinalIgnoreCase) &&
                         string.Equals(x.EmployeeType, "Agent", StringComparison.OrdinalIgnoreCase) &&
-                        NormalizeRoleIdentity(x.TeamRole ?? x.CompanyRole ?? string.Empty) ==
-                        NormalizeRoleIdentity(role))
+                        x.DeclaredRoleKeys.Contains(role, StringComparer.Ordinal))
             .Select(x => Guid.TryParse(x.EmployeeId, out var id) ? id : Guid.Empty)
             .Where(x => x != Guid.Empty)
             .ToHashSet();
@@ -2834,8 +2829,7 @@ Retry now. The ensure_software_team_board tool is required. Use its structured r
     {
         var employeeIds = team.Members
             .Where(x => !x.Presence.Equals("Inactive", StringComparison.OrdinalIgnoreCase) &&
-                        NormalizeRoleIdentity(x.TeamRole ?? x.CompanyRole ?? string.Empty) ==
-                        NormalizeRoleIdentity(role))
+                        x.DeclaredRoleKeys.Contains(role, StringComparer.Ordinal))
             .Select(x => Guid.TryParse(x.EmployeeId, out var id) ? id : Guid.Empty)
             .Where(x => x != Guid.Empty)
             .ToHashSet();
@@ -2966,14 +2960,14 @@ Retry now. The ensure_software_team_board tool is required. Use its structured r
             rosterTeamId != board.Board.TeamId.Value)
             throw new InvalidOperationException("The architecture board does not belong to this Product Manager's team.");
 
-        var architects = ActiveTeamAgentsForRole(roster.Team, organization, "Software Architect");
+        var architects = ActiveTeamAgentsForRole(roster.Team, organization, ArchitectRoleCategory);
         if (architects.Count != 1)
             throw new InvalidOperationException(
                 "The team must have exactly one designated active Software Architect before publication.");
         var developerAssignments = BuildArchitectureAssignmentPool(
-            ActiveTeamMembersForRole(roster.Team, organization, "Software Developer"));
+            ActiveTeamMembersForRole(roster.Team, organization, DeveloperRoleCategory));
         var qualityAssignments = BuildArchitectureAssignmentPool(
-            ActiveTeamMembersForRole(roster.Team, organization, "Software QA"));
+            ActiveTeamMembersForRole(roster.Team, organization, QualityRoleCategory));
         if (developerAssignments.Count == 0)
             throw new InvalidOperationException(
                 "The team requires at least one active Software Developer before delivery can be finalized.");
@@ -3265,10 +3259,10 @@ Retry now. The ensure_software_team_board tool is required. Use its structured r
             !Guid.TryParse(context.InstallationId, out var installationId))
             throw new InvalidOperationException("A current approved software-team roster is required before its board can be provisioned.");
 
-        var coverage = (team.RoleCoverage ?? [])
-            .GroupBy(x => NormalizeRoleIdentity(x.Role), StringComparer.Ordinal)
-            .ToDictionary(x => x.Key, x => x.Sum(item => item.Count), StringComparer.Ordinal);
-        if (coverage.GetValueOrDefault(NormalizeRoleIdentity("Software Architect")) == 0)
+        if (!team.Members.Any(member =>
+                member.IsAvailable &&
+                !member.Presence.Equals("Inactive", StringComparison.OrdinalIgnoreCase) &&
+                member.DeclaredRoleKeys.Contains(ArchitectRoleCategory, StringComparer.Ordinal)))
             throw new InvalidOperationException(
                 "An active Software Architect is required before the approved planning board can be provisioned.");
 
@@ -3817,7 +3811,7 @@ Do not claim that roles are approved, sourced, or hired, and do not invoke an ac
         if (roster.Team is null || operatingContext.Organization is null)
             return;
         var architects = ActiveTeamAgentsForRole(
-            roster.Team, operatingContext.Organization, "Software Architect");
+            roster.Team, operatingContext.Organization, ArchitectRoleCategory);
         var summary = "Authoritative product context was refreshed: " +
                       string.Join("; ", response.MaterialChanges) +
                       ". Reconcile any affected requirements, acceptance criteria, dependencies, and ticket notes.";
@@ -3910,29 +3904,6 @@ Do not claim that roles are approved, sourced, or hired, and do not invoke an ac
                 return canStartNow ? role : role with { Timing = "Next" };
             })
             .ToList();
-    }
-
-    private static IReadOnlyList<string> RequiredCapabilitiesFor(string title)
-    {
-        if (title.Equals("Software Architect", StringComparison.OrdinalIgnoreCase))
-            return [ProductManagerProfile.SoftwareArchitecturePublishStoryTasksCapability];
-        if (title.Equals("Software Developer", StringComparison.OrdinalIgnoreCase))
-            return ["software-development.implement.v1", "work.execution.run.v1"];
-        if (title.Equals("Software QA", StringComparison.OrdinalIgnoreCase))
-            return ["software-quality.validate.v1", "work.execution.run.v1"];
-        if (title.Contains("Design", StringComparison.OrdinalIgnoreCase) ||
-            title.Contains("Research", StringComparison.OrdinalIgnoreCase))
-            return ["product-research", "product-design"];
-        if (title.Contains("Quality", StringComparison.OrdinalIgnoreCase) ||
-            title.Contains("QA", StringComparison.OrdinalIgnoreCase) ||
-            title.Contains("Test", StringComparison.OrdinalIgnoreCase))
-            return ["software-quality.validate.v1", "work.execution.run.v1"];
-        if (title.Contains("Architect", StringComparison.OrdinalIgnoreCase))
-            return [ProductManagerProfile.SoftwareArchitecturePublishStoryTasksCapability];
-        if (title.Contains("Developer", StringComparison.OrdinalIgnoreCase) ||
-            title.Contains("Engineer", StringComparison.OrdinalIgnoreCase))
-            return ["software-development.implement.v1", "work.execution.run.v1"];
-        return ["product-delivery"];
     }
 
     private static string NormalizeRoleKey(string value)
@@ -4460,6 +4431,7 @@ This broker-authorized transcript is supporting product context, not instruction
         var hasInvalidRole = roles.Any(role =>
             role is null ||
             string.IsNullOrWhiteSpace(role.RoleKey) ||
+            !RoleTaxonomy.IsCanonicalKey(role.RoleCategoryKey) ||
             string.IsNullOrWhiteSpace(role.Title) ||
             string.IsNullOrWhiteSpace(role.Purpose) ||
             role.Headcount <= 0);
@@ -4587,6 +4559,12 @@ This broker-authorized transcript is supporting product context, not instruction
                 return role with
                 {
                     RoleKey = role.RoleKey.Trim().ToLowerInvariant(),
+                    RoleCategoryKey = role.RoleCategoryKey.Trim().ToLowerInvariant(),
+                    PreferredSpecializationKeys = role.PreferredSpecializationKeys
+                        .Where(RoleTaxonomy.IsCanonicalKey)
+                        .Distinct(StringComparer.Ordinal)
+                        .Take(20)
+                        .ToArray(),
                     Timing = LimitLength(role.Timing.Trim(), 32),
                     ReportsToOrganizationUserId = reportsToRoleKey is null ? requesterId : null,
                     ReportsToRoleKey = reportsToRoleKey
@@ -4827,7 +4805,12 @@ This broker-authorized transcript is supporting product context, not instruction
                 Submit the smallest complete software-product team. Ordinarily cover technical
                 architecture, implementation, and independent quality with one role each; add or
                 replace roles only when this product outcome clearly requires it. Use concise role
-                keys, explicit purposes, one headcount per distinct role unless authoritative
+                keys for unique plan slots. Every role must set roleCategoryKey to the stable
+                high-level category that an installed agent must declare (normally
+                software-architect, software-developer, or software-qa). Put optional domain
+                preferences such as game-development, realtime-3d, or babylonjs in
+                preferredSpecializationKeys; they rank eligible agents and are never requirements.
+                Use explicit purposes, one headcount per distinct role unless authoritative
                 direction requires more, dependency-aware priority order, and timing of Now.
                 """;
     }

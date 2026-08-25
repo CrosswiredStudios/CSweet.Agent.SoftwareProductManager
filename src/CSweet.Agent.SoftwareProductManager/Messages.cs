@@ -56,6 +56,7 @@ public sealed record ProductCharterCheckpoint(
 
 public sealed record ProductManagerRoleHealth(
     string RoleKey,
+    string RoleCategoryKey,
     string RoleTitle,
     int DesiredHeadcount,
     int EffectiveHeadcount,

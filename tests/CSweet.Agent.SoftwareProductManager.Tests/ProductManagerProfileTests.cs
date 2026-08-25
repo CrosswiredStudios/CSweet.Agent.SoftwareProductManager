@@ -160,7 +160,7 @@ public sealed class ProductManagerProfileTests
             "src",
             "CSweet.Agent.SoftwareProductManager",
             "CSweet.Agent.SoftwareProductManager.csproj"));
-        Assert.Contains("CSweet.Agent.SDK\" Version=\"3.18.0", project, StringComparison.Ordinal);
+        Assert.Contains("CSweet.Agent.SDK\" Version=\"3.19.0", project, StringComparison.Ordinal);
         Assert.Contains("<ProjectReference", project, StringComparison.Ordinal);
         Assert.Contains($"<Version>{ProductManagerProfile.Version}</Version>", project, StringComparison.Ordinal);
     }
@@ -649,7 +649,7 @@ What level of prototype fidelity are we aiming for?
     }
 
     [Fact]
-    public async Task ArchitectReadinessAndAttention_ImmediatelyStartsGovernedPlanningExactlyOnce()
+    public async Task SpecializedGameArchitectSlot_IsFilledByCanonicalSoftwareArchitectExactlyOnce()
     {
         var organizationId = Guid.NewGuid();
         var teamId = Guid.NewGuid();
@@ -666,9 +666,11 @@ What level of prototype fidelity are we aiming for?
         var kickoffMessageId = Guid.NewGuid();
         var boardId = Guid.NewGuid();
         var personalBoardId = Guid.NewGuid();
-        var role = Role("architecture", "Software Architect", 1, "Now") with
+        var role = Role("game-tech-architect", "Game Architect", 1, "Now") with
         {
-            ReportsToOrganizationUserId = productManagerId
+            ReportsToOrganizationUserId = productManagerId,
+            RoleCategoryKey = "software-architect",
+            PreferredSpecializationKeys = ["game-development"]
         };
         var approved = new ResourceChangeRequestResponse(
             requestId, organizationId, productManagerId, productManagerInstallationId, managerId,
@@ -685,9 +687,9 @@ What level of prototype fidelity are we aiming for?
             productManagerId.ToString("D"), "Product Manager",
             [
                 new AgentTeammate(productManagerId.ToString("D"), "Product Manager", "Agent", null,
-                    "Software Product Manager", "Self", "Active"),
+                    "Software Product Manager", "Self", "Active") { DeclaredRoleKeys = ["software-product-manager"] },
                 new AgentTeammate(architectId.ToString("D"), "Software Architect", "Agent", null,
-                    "Software Architect", "DirectReport", "Active")
+                    "Architect", "DirectReport", "Active") { DeclaredRoleKeys = ["software-architect"] }
             ],
             [new TeamRoleCoverage("Software Architect", 1)], 2, false);
         var organization = new OrganizationSnapshotResponse(
@@ -1510,9 +1512,9 @@ Facts vs. inference: the pattern catalog says we should validate first. The stru
                     productManagerId.ToString("D"), "Product Manager",
                     [
                         new AgentTeammate(productManagerId.ToString("D"), "Product Manager", "Agent",
-                            null, "Product Manager", "Self", "Active"),
+                            null, "Product Manager", "Self", "Active") { DeclaredRoleKeys = ["software-product-manager"] },
                         new AgentTeammate(architectId.ToString("D"), "Architect", "Agent",
-                            null, "Software Architect", "DirectReport", "Active")
+                            null, "Software Architect", "DirectReport", "Active") { DeclaredRoleKeys = ["software-architect"] }
                     ], [], 2, false))))
             .RegisterCapability<WorkBoardListRequest, IReadOnlyList<WorkBoardSummary>>(
                 WorkBoardCapabilities.Read,
@@ -1980,7 +1982,8 @@ Revert the isolated state module.
                     1,
                     response.RequesterOrganizationUserId.ToString("D"),
                     "Product Manager",
-                    [],
+                    [new AgentTeammate(Guid.NewGuid().ToString("D"), "Engineer", "Agent", null,
+                        "Product Engineer", "Teammate", "Active") { DeclaredRoleKeys = ["software-developer"] }],
                     [new TeamRoleCoverage("Product Engineer", 1)],
                     1,
                     false))))
@@ -2056,10 +2059,10 @@ Revert the isolated state module.
             teamId.ToString("D"), "release", "Release Team", 1,
             productManagerId.ToString("D"), "Product Manager",
             [
-                new AgentTeammate(productManagerId.ToString("D"), "Product Manager", "Agent", null, "Software Product Manager", "Self", "Active"),
-                new AgentTeammate(architectId.ToString("D"), "Architect", "Agent", null, "Software Architect", "Peer", "Active"),
-                new AgentTeammate(developerId.ToString("D"), "Developer", "Agent", null, "Software Developer", "Peer", "Active"),
-                new AgentTeammate(qualityId.ToString("D"), "QA", "Agent", null, "Software QA", "Peer", "Active")
+                new AgentTeammate(productManagerId.ToString("D"), "Product Manager", "Agent", null, "Software Product Manager", "Self", "Active") { DeclaredRoleKeys = ["software-product-manager"] },
+                new AgentTeammate(architectId.ToString("D"), "Architect", "Agent", null, "Software Architect", "Peer", "Active") { DeclaredRoleKeys = ["software-architect"] },
+                new AgentTeammate(developerId.ToString("D"), "Developer", "Agent", null, "Software Developer", "Peer", "Active") { DeclaredRoleKeys = ["software-developer"] },
+                new AgentTeammate(qualityId.ToString("D"), "QA", "Agent", null, "Software QA", "Peer", "Active") { DeclaredRoleKeys = ["software-qa"] }
             ],
             [
                 new TeamRoleCoverage("Software Architect", 1),
@@ -2451,7 +2454,16 @@ Revert the isolated state module.
             ["product-delivery"],
             false,
             Guid.NewGuid(),
-            null);
+            null)
+        {
+            RoleCategoryKey = title.Contains("Architect", StringComparison.OrdinalIgnoreCase)
+                ? "software-architect"
+                : title.Contains("QA", StringComparison.OrdinalIgnoreCase) || title.Contains("Quality", StringComparison.OrdinalIgnoreCase)
+                    ? "software-qa"
+                    : title.Contains("Developer", StringComparison.OrdinalIgnoreCase) || title.Contains("Engineer", StringComparison.OrdinalIgnoreCase)
+                        ? "software-developer"
+                        : "general-specialist"
+        };
 
     private static ResourceChangeRequestResponse ResourceChange(
         Guid requestId,
