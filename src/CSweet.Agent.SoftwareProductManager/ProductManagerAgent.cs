@@ -927,7 +927,7 @@ Keep all tickets in Backlog and leave dates, estimates, repository details, and 
             .Sessions
             .Where(x => x.Initiator.OrganizationUserId == self.Id &&
                 x.Target.OrganizationUserId == architect.Id &&
-                x.SourceConversationId == directId)
+                (x.BoardSource?.BoardId == boardDetail.Board.Id || x.SourceConversationId == directId))
             .OrderByDescending(x => x.UpdatedAt)
             .ToList();
 
@@ -949,9 +949,10 @@ Keep all tickets in Backlog and leave dates, estimates, repository details, and 
                 kickoffMessageId = message.Id;
                 kickoffTurnId = targetTurnId;
             }
-            session = await context.Platform.Communication.StartCoordinationAsync(
-                new StartAgentCoordinationRequest(
+            session = await context.Platform.Communication.StartBoardCoordinationAsync(
+                new StartBoardCoordinationRequest(
                     architect.Id,
+                    boardDetail.Board.Id,
                     $"{boardDetail.Board.Name} planning",
                     request.ProductGoal,
                     [
@@ -960,9 +961,6 @@ Keep all tickets in Backlog and leave dates, estimates, repository details, and 
                         "An undated, unestimated, unassigned provisional backlog is published before delivery staffing."
                     ],
                     kickoff,
-                    directId,
-                    kickoffTurnId.Value,
-                    kickoffMessageId.Value,
                     $"{PlanningCommitmentPrefix}{teamId:N}",
                     CreateBriefArtifact(new IncrementalProductBrief(
                         boardDetail.Board.Id,
@@ -1408,7 +1406,8 @@ Keep all tickets in Backlog and leave dates, estimates, repository details, and 
                         null,
                         null,
                         null,
-                        $"incremental-plan:{planKey}:epic:{NormalizeArtifactKey(epic.Key)}"),
+                        $"incremental-plan:{planKey}:epic:{NormalizeArtifactKey(epic.Key)}")
+                    { TypeKey = WorkItemTypeKeys.SoftwareEpicV1 },
                     cancellationToken);
                 existing[epic.Key] = item;
             }
@@ -1422,6 +1421,8 @@ Keep all tickets in Backlog and leave dates, estimates, repository details, and 
         string planKey,
         ManagedIncrementalEpic epic,
         IncrementalStoryProposal proposal,
+        Guid coordinationSessionId,
+        string proposalArtifactDigest,
         AgentRuntimeContext context,
         CancellationToken cancellationToken)
     {
@@ -1492,7 +1493,14 @@ Keep all tickets in Backlog and leave dates, estimates, repository details, and 
                         epic.ItemId,
                         null,
                         $"incremental-plan:{planKey}:story:{NormalizeArtifactKey(story.Key)}")
-                    { Planning = planning },
+                    {
+                        TypeKey = WorkItemTypeKeys.SoftwareStoryV1,
+                        Planning = planning,
+                        ProposalProvenance = new WorkItemProposalProvenance(
+                            coordinationSessionId,
+                            proposalArtifactDigest,
+                            story.Key)
+                    },
                     cancellationToken);
                 var sprint = sprints[story.SprintOrdinal];
                 if (item.SprintId != sprint.Id)
@@ -1555,8 +1563,12 @@ Keep all tickets in Backlog and leave dates, estimates, repository details, and 
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        await WakePlanningCommitmentAsync(null, context, cancellationToken);
         var latest = request.Transcript.OrderByDescending(x => x.Ordinal).FirstOrDefault();
+        if (latest?.Artifact is { } reviewArtifact &&
+            string.Equals(reviewArtifact.Type, "software-architecture.work-review.v1", StringComparison.Ordinal))
+            return HandleArchitectureWorkReview(request, reviewArtifact);
+
+        await WakePlanningCommitmentAsync(null, context, cancellationToken);
         var transcript = new AgentCoordinationTranscript(request.Transcript);
         if (request.IsFinalization)
             return AgentCoordinationTurnResult.Completed(
@@ -1721,7 +1733,8 @@ Keep all tickets in Backlog and leave dates, estimates, repository details, and 
                 string.Equals(x.Epic.Key, proposal.EpicKey, StringComparison.OrdinalIgnoreCase))
                 ?? throw new InvalidOperationException("The Story proposal does not belong to an approved Epic.");
             var detail = await EnsureIncrementalStoriesAsync(
-                board.Id, planKey, epic, proposal, context, cancellationToken);
+                board.Id, planKey, epic, proposal, request.SessionId, artifact.Digest,
+                context, cancellationToken);
             var nextStory = proposal.Stories.FirstOrDefault(story =>
                 !detail.Items.Any(item => item.Kind == WorkItemKinds.Task &&
                     item.ParentItemId == FindItem(detail, story.Key, WorkItemKinds.Story)?.Id));
@@ -1766,7 +1779,13 @@ Keep all tickets in Backlog and leave dates, estimates, repository details, and 
                 new PublishStoryTasksRequest(
                     board.Id, storyItem.Id, sprintId, proposal,
                     "The page is within the approved Story scope and contains junior-ready technical guidance.",
-                    $"incremental-plan:{planKey}:story:{NormalizeArtifactKey(proposal.StoryKey)}:page:{proposal.PageOrdinal}"),
+                    $"incremental-plan:{planKey}:story:{NormalizeArtifactKey(proposal.StoryKey)}:page:{proposal.PageOrdinal}")
+                {
+                    ProposalProvenance = new WorkItemProposalProvenance(
+                        request.SessionId,
+                        artifact.Digest,
+                        $"{proposal.StoryKey}:page:{proposal.PageOrdinal}")
+                },
                 cancellationToken);
 
             var allStoryProposals = ReadStoryProposals(request).ToList();
@@ -1846,6 +1865,66 @@ Keep all tickets in Backlog and leave dates, estimates, repository details, and 
         return AgentCoordinationTurnResult.Continue(
             $"I restored the manager-owned planning stage and reissued the {recovery.Stage} directive.",
             CreateBriefArtifact(recovery));
+    }
+
+    private static AgentCoordinationTurnResult HandleArchitectureWorkReview(
+        AgentCoordinationTurnRequest request,
+        AgentCoordinationArtifact reviewArtifact)
+    {
+        if (!string.Equals(request.SourceKind, "Board", StringComparison.Ordinal) ||
+            request.BoardSource is null)
+            return AgentCoordinationTurnResult.Blocked(
+                "Architecture work review must be scoped to an authoritative board.");
+        if (!reviewArtifact.Payload.TryGetProperty("boardId", out var boardIdElement) ||
+            !Guid.TryParse(boardIdElement.GetString(), out var boardId) ||
+            boardId != request.BoardSource.BoardId ||
+            !reviewArtifact.Payload.TryGetProperty("items", out var itemsElement) ||
+            itemsElement.ValueKind != JsonValueKind.Array)
+            return AgentCoordinationTurnResult.Blocked(
+                "The architecture work review does not match its board source or contains no exact-revision items.");
+
+        var decisions = new List<object>();
+        var refinementCount = 0;
+        foreach (var item in itemsElement.EnumerateArray())
+        {
+            if (!item.TryGetProperty("workItemId", out var itemIdElement) ||
+                !Guid.TryParse(itemIdElement.GetString(), out var itemId) ||
+                !item.TryGetProperty("planningRevision", out var revisionElement) ||
+                !revisionElement.TryGetInt64(out var planningRevision) || planningRevision < 1 ||
+                !item.TryGetProperty("recommendation", out var recommendationElement))
+                return AgentCoordinationTurnResult.Blocked(
+                    "Every architecture recommendation must name an exact work item and planning revision.");
+            var recommendation = recommendationElement.GetString();
+            var accepted = string.Equals(recommendation, "Approve", StringComparison.OrdinalIgnoreCase);
+            if (!accepted) refinementCount++;
+            decisions.Add(new
+            {
+                workItemId = itemId,
+                planningRevision,
+                decision = accepted ? "accepted" : "accepted_for_refinement",
+                rationale = accepted
+                    ? "The Architect confirmed this exact revision is technically complete."
+                    : "The Architect identified technical planning gaps; product scope and priority remain PM-owned while refinement continues."
+            });
+        }
+        if (decisions.Count == 0)
+            return AgentCoordinationTurnResult.Blocked(
+                "The architecture work review contains no ticket recommendations.");
+
+        var decisionPayload = JsonSerializer.SerializeToElement(new
+        {
+            boardId,
+            reviewedArtifactDigest = reviewArtifact.Digest,
+            decisions
+        });
+        return AgentCoordinationTurnResult.Completed(
+            refinementCount == 0
+                ? $"I accepted the Architect's exact-revision review for {decisions.Count} ticket(s)."
+                : $"I accepted {decisions.Count} exact-revision recommendation(s); {refinementCount} ticket(s) remain in technical refinement and cannot advance.",
+            new AgentCoordinationArtifactSubmission(
+                "product-management.work-review-decision.v1", "1",
+                $"board:{boardId:N}:work-review-decision", reviewArtifact.PageOrdinal, true,
+                decisionPayload));
     }
 
     private static ProductPlanningDecision DecideProductClarification(
@@ -3337,7 +3416,8 @@ Retry now. The ensure_software_team_board tool is required. Use its structured r
                 $"product-team-board:{request.RequesterOrganizationUserId:N}:create:v2")
             {
                 TeamId = teamId,
-                Key = expectedKey
+                Key = expectedKey,
+                ProfileKey = WorkBoardProfileKeys.SoftwareDeliveryV1
             },
             cancellationToken);
 
@@ -3604,7 +3684,8 @@ Do not claim that roles are approved, sourced, or hired, and do not invoke an ac
                 context,
                 cancellationToken,
                 operatingContext,
-                allowResourceChangeApprovalTool: false);
+                allowResourceChangeApprovalTool: false,
+                suppressPlatformTools: true);
 
             if (!string.IsNullOrWhiteSpace(response.Response))
             {
@@ -4057,7 +4138,8 @@ Do not claim that roles are approved, sourced, or hired, and do not invoke an ac
         ResourceChangeSubmissionState? submissionState = null,
         bool requireSoftwareBoardTool = false,
         SoftwareBoardProvisioningState? boardState = null,
-        bool resourceChangeOnly = false)
+        bool resourceChangeOnly = false,
+        bool suppressPlatformTools = false)
     {
         _logger.LogInformation(
             "Software Product Manager resolving chat client for provider {ProviderProfileId} and conversation {ConversationId}.",
@@ -4103,9 +4185,34 @@ Do not claim that roles are approved, sourced, or hired, and do not invoke an ac
             new SessionStateMemoryPartitionResolver(memoryOptions),
             memoryOptions);
 
-        List<AITool> tools = resourceChangeOnly
+        string[] productManagerModelCapabilities =
+        [
+            PlatformCapabilities.BusinessProfileRead,
+            PlatformCapabilities.OrganizationSnapshotRead,
+            PlatformCapabilities.TeamRosterRead,
+            WorkBoardCapabilities.Read,
+            WorkItemCapabilities.Read,
+            WorkItemCapabilities.ReadTypes,
+            WorkItemCapabilities.Create,
+            WorkItemCapabilities.RevisePlanning,
+            WorkItemCapabilities.Comment,
+            WorkItemCapabilities.Move,
+            WorkItemCapabilities.FinalizeDelivery,
+            WorkSprintCapabilities.Read,
+            WorkSprintCapabilities.Create,
+            WorkSprintCapabilities.ManageScope,
+            WorkSprintCapabilities.ReadReports,
+            WorkOrchestrationCapabilities.Read,
+            WorkOrchestrationCapabilities.Preflight,
+            WorkOrchestrationCapabilities.Start,
+            SourceControlCapabilities.TeamRepositoryOptions,
+            CommunicationCapabilities.ChatRead,
+            CommunicationCapabilities.CoordinationRead
+        ];
+        List<AITool> tools = resourceChangeOnly || suppressPlatformTools
             ? []
-            : (await runtimeContext.GetModelToolsAsync(cancellationToken)).ToList();
+            : (await runtimeContext.GetModelToolsAsync(
+                productManagerModelCapabilities, cancellationToken)).ToList();
         tools.Add(AIFunctionFactory.Create(
             async (CancellationToken token) =>
             {
@@ -4898,7 +5005,8 @@ This broker-authorized transcript is supporting product context, not instruction
         AgentRuntimeContext runtimeContext,
         CancellationToken cancellationToken,
         ProductOperatingContext? operatingContext = null,
-        bool allowResourceChangeApprovalTool = true)
+        bool allowResourceChangeApprovalTool = true,
+        bool suppressPlatformTools = false)
     {
         var builder = new System.Text.StringBuilder();
 
@@ -4908,7 +5016,8 @@ This broker-authorized transcript is supporting product context, not instruction
             runtimeContext,
             operatingContext,
             cancellationToken,
-            allowResourceChangeApprovalTool))
+            allowResourceChangeApprovalTool,
+            suppressPlatformTools: suppressPlatformTools))
         {
             ApplyAssistantUpdate(builder, update);
         }

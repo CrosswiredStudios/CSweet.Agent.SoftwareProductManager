@@ -197,7 +197,7 @@ public sealed class ProductManagerProfileTests
             "src",
             "CSweet.Agent.SoftwareProductManager",
             "CSweet.Agent.SoftwareProductManager.csproj"));
-        Assert.Contains("CSweet.Agent.SDK\" Version=\"3.19.1", project, StringComparison.Ordinal);
+        Assert.Contains("CSweet.Agent.SDK\" Version=\"3.20.0", project, StringComparison.Ordinal);
         Assert.Contains("<ProjectReference", project, StringComparison.Ordinal);
         Assert.Contains($"<Version>{ProductManagerProfile.Version}</Version>", project, StringComparison.Ordinal);
     }
@@ -780,7 +780,7 @@ What level of prototype fidelity are we aiming for?
         };
         var requeueCount = 0;
         AgentCoordinationSession? session = null;
-        var coordinationStarts = new List<StartAgentCoordinationRequest>();
+        var coordinationStarts = new List<StartBoardCoordinationRequest>();
         var sentMessages = new List<CommunicationSendCapture>();
 
         var runtime = new AgentTestRuntime()
@@ -849,21 +849,22 @@ What level of prototype fidelity are we aiming for?
                 CommunicationCapabilities.CoordinationList,
                 (_, _) => Task.FromResult(new AgentCoordinationSessions(
                     session is null ? [] : [session])))
-            .RegisterCapability<StartAgentCoordinationRequest, AgentCoordinationSession>(
-                CommunicationCapabilities.CoordinationStart,
+            .RegisterCapability<StartBoardCoordinationRequest, AgentCoordinationSession>(
+                CommunicationCapabilities.CoordinationStartBoard,
                 (request, _) =>
                 {
                     coordinationStarts.Add(request);
                     session ??= new AgentCoordinationSession(
-                        Guid.NewGuid(), request.SourceConversationId, request.SourceConversationId,
-                        request.SourceChatTurnId, request.SourceMessageId,
+                        Guid.NewGuid(), chatId, chatId,
+                        kickoffTurnId, kickoffMessageId,
                         new AgentCoordinationParticipant(productManagerId, productManagerInstallationId,
                             "Product Manager", "Software Product Manager"),
                         new AgentCoordinationParticipant(architectId, architectInstallationId,
                             "Software Architect", "Software Architect"),
                         request.Subject, request.Objective, request.SuccessCriteria,
                         AgentCoordinationStatuses.Active, 1, 1, architectId, false, null,
-                        DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, []);
+                        DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, [])
+                    { SourceKind = "Board", BoardSource = new AgentCoordinationBoardSource(request.BoardId) };
                     return Task.FromResult(session);
                 })
             .RegisterCapability<CommunicationSendCapture, CommunicationMessage>(
@@ -919,8 +920,7 @@ What level of prototype fidelity are we aiming for?
         Assert.NotNull(firstResult);
         Assert.NotNull(replayResult);
         var start = Assert.Single(coordinationStarts);
-        Assert.Equal(kickoffMessageId, start.SourceMessageId);
-        Assert.Equal(kickoffTurnId, start.SourceChatTurnId);
+        Assert.Equal(boardId, start.BoardId);
         Assert.Equal($"product-architect-planning:{teamId:N}", start.IdempotencyKey);
         var kickoff = Assert.Single(sentMessages);
         Assert.Equal($"planning-kickoff:{teamId:N}", kickoff.IdempotencyKey);
@@ -1435,6 +1435,59 @@ Facts vs. inference: the pattern catalog says we should validate first. The stru
         Assert.Equal(digest, decision.DesignDigest);
         Assert.Equal(ArchitecturePlanningStages.Stories, decision.NextDirective!.Stage);
         Assert.Equal(digest, decision.NextDirective.ApprovedDesignDigest);
+    }
+
+    [Fact]
+    public async Task BoardWorkReview_ReturnsDeterministicExactRevisionDecisionWithoutRestartingPlanning()
+    {
+        var boardId = Guid.NewGuid();
+        var itemId = Guid.NewGuid();
+        var productManagerId = Guid.NewGuid();
+        var architectId = Guid.NewGuid();
+        var artifact = new AgentCoordinationArtifact(
+            "software-architecture.work-review.v1", "1", $"board:{boardId:N}", 1, true,
+            JsonSerializer.SerializeToElement(new
+            {
+                boardId,
+                items = new[]
+                {
+                    new
+                    {
+                        workItemId = itemId,
+                        planningRevision = 3L,
+                        recommendation = "ChangesRequested",
+                        missing = new[] { "approved design linkage" }
+                    }
+                }
+            }),
+            "sha256:review");
+        var request = new AgentCoordinationTurnRequest(
+            Guid.NewGuid(), 1, 1, "Architecture work review", "Review pending software work.",
+            ["Every decision names an exact planning revision."],
+            new AgentCoordinationParticipant(productManagerId, Guid.NewGuid(), "Product Manager", "Product Manager"),
+            new AgentCoordinationParticipant(architectId, Guid.NewGuid(), "Architect", "Software Architect"),
+            false,
+            [new AgentCoordinationTurn(Guid.NewGuid(), 0, architectId,
+                AgentCoordinationDispositions.Continue, "Exact-revision review attached.",
+                DateTimeOffset.UtcNow, artifact)])
+        {
+            SourceKind = "Board",
+            BoardSource = new AgentCoordinationBoardSource(boardId)
+        };
+        var agent = new ProductManagerAgent(
+            NullLogger<ProductManagerAgent>.Instance,
+            new ProductManagerOrchestrator(NullLogger<ProductManagerOrchestrator>.Instance));
+
+        var result = await agent.HandleCoordinationTurnAsync(
+            request, new AgentTestRuntime().CreateContext(), CancellationToken.None);
+
+        Assert.Equal(AgentCoordinationDispositions.Completed, result.Disposition);
+        Assert.Equal("product-management.work-review-decision.v1", result.Artifact?.Type);
+        Assert.Contains("remain in technical refinement", result.Content, StringComparison.OrdinalIgnoreCase);
+        var decision = Assert.Single(result.Artifact!.Payload.GetProperty("decisions").EnumerateArray());
+        Assert.Equal(itemId, decision.GetProperty("workItemId").GetGuid());
+        Assert.Equal(3, decision.GetProperty("planningRevision").GetInt64());
+        Assert.Equal("accepted_for_refinement", decision.GetProperty("decision").GetString());
     }
 
     [Fact]

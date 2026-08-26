@@ -8,10 +8,13 @@
   },
   "id": "com.csweet.product-manager",
   "name": "C-Sweet Software Product Manager",
-  "version": "2.12.2",
+  "version": "2.13.0",
   "publisher": {
     "id": "com.csweet",
     "name": "C-Sweet"
+  },
+  "workItemTypes": {
+    "requires": ["software.epic.v1", "software.story.v1", "software.task.v1"]
   },
   "runtime": {
     "type": "dotnet-project",
@@ -547,6 +550,7 @@
     { "name": "communication.chat.modify.v1", "scope": "team", "purpose": "Reconcile an authorized private team conversation" },
     { "name": "communication.message.send.v1", "scope": "team", "purpose": "Coordinate product decisions and planning revisions with authorized team members" },
     { "name": "communication.coordination.start.v1", "scope": "team", "purpose": "Start the one durable PM-Architect planning collaboration" },
+    { "name": "communication.coordination.start-board.v1", "scope": "team", "purpose": "Start or resume visible board-scoped planning review with the designated Architect", "modelVisible": false },
     { "name": "communication.coordination.respond.v1", "scope": "team", "purpose": "Submit one structured product collaboration disposition" },
     { "name": "communication.coordination.read.v1", "scope": "team", "purpose": "Read the PM-Architect collaboration session" },
     { "name": "communication.coordination.list.v1", "scope": "team", "purpose": "List the Product Manager's own planning sessions for deterministic recovery" },
@@ -563,6 +567,9 @@
     { "name": "work.board.configure", "scope": "team", "purpose": "Set or correct the concise outcome-focused name of the Product Manager's board", "modelVisible": false },
     { "name": "work.board.columns.configure", "scope": "team", "purpose": "Configure the approved software team's seven-column workflow", "modelVisible": false },
     { "name": "work.item.read", "scope": "team", "purpose": "Read published sprint tickets before revision-safe readiness moves" },
+    { "name": "work.item.types.read.v1", "scope": "organization", "purpose": "Resolve the platform-owned software work type catalog" },
+    { "name": "work.item.planning.revise.v1", "scope": "team", "purpose": "Apply PM-approved Architect recommendations with planning-revision concurrency" },
+    { "name": "work.item.approval.decide.v1", "scope": "team", "purpose": "Record a manager-authorized architecture waiver when the approved team design omits an Architect", "modelVisible": false },
     { "name": "work.item.create", "scope": "team", "purpose": "Create idempotent decision-ready planning tickets during approved agent collaboration" },
     { "name": "work.item.comment", "scope": "team", "purpose": "Record authoritative product-context decisions on affected planning tickets" },
     { "name": "work.item.move", "scope": "team", "purpose": "Move the first planned sprint's Stories and Tasks to Ready For Development" },
