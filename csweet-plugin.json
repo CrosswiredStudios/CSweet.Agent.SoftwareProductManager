@@ -3,12 +3,12 @@
   "kind": "agent",
   "rolePolicy": {
     "profile": "manager.v1",
-    "declaredRoleKeys": ["software-product-manager"],
+    "declaredRoleKeys": ["software-product-manager", "product-manager"],
     "specializationKeys": ["product-strategy", "software-delivery"]
   },
   "id": "com.csweet.product-manager",
   "name": "C-Sweet Software Product Manager",
-  "version": "2.13.0",
+  "version": "2.14.0",
   "publisher": {
     "id": "com.csweet",
     "name": "C-Sweet"

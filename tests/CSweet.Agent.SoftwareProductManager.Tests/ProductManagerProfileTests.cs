@@ -10,6 +10,62 @@ namespace CSweet.Agent.SoftwareProductManager.Tests;
 public sealed class ProductManagerProfileTests
 {
     [Fact]
+    public async Task AuthoritativeCreativeDirectorBrief_IsPersistedAndAcknowledgedForExactDigest()
+    {
+        const string digest = "accepted-game-pitch-digest";
+        var productManagerId = Guid.NewGuid();
+        var creativeDirectorId = Guid.NewGuid();
+        AgentOperatingStateWriteRequest? written = null;
+        var runtime = new AgentTestRuntime()
+            .RegisterCapability<AgentOperatingStateReadRequest, AgentOperatingStateReadResponse>(
+                PlatformCapabilities.AgentOperatingStateRead,
+                (_, _) => Task.FromResult(new AgentOperatingStateReadResponse(null)))
+            .RegisterCapability<AgentOperatingStateWriteRequest, AgentOperatingStateResponse>(
+                PlatformCapabilities.AgentOperatingStateWrite,
+                (request, _) =>
+                {
+                    written = request;
+                    var now = DateTimeOffset.UtcNow;
+                    return Task.FromResult(new AgentOperatingStateResponse(
+                        Guid.NewGuid(), request.StateKey, request.SchemaId, request.SchemaVersion,
+                        request.Status, request.SourceRevisions, request.ConditionCodes,
+                        request.DecisionFingerprint, request.OpenCommitmentCorrelations,
+                        request.AttentionReviewId, request.Payload, 1, now, now));
+                });
+        var context = runtime.CreateContext(
+            Guid.NewGuid().ToString("D"), Guid.NewGuid().ToString("D"),
+            new AgentIdentity(productManagerId.ToString("D"), "Product Manager", null,
+                "Product Manager", null, [], null, creativeDirectorId.ToString("D"), "Creative Director"));
+        var artifactPayload = JsonSerializer.SerializeToElement(new { acceptedPitchDigest = digest });
+        var request = new AgentCoordinationTurnRequest(
+            Guid.NewGuid(), 1, 1, "Game vision", "Adopt the accepted vision", ["Acknowledge exact digest"],
+            new(productManagerId, Guid.NewGuid(), "Product Manager", "Product Manager"),
+            new(creativeDirectorId, Guid.NewGuid(), "Creative Director", "Creative Director"),
+            false,
+            [new AgentCoordinationTurn(
+                Guid.NewGuid(), 0, creativeDirectorId, AgentCoordinationDispositions.Continue,
+                "Adopt this charter.", DateTimeOffset.UtcNow,
+                new AgentCoordinationArtifact(
+                    "creative-direction.game-vision-brief.v1", "1.0", digest, 1, true,
+                    artifactPayload, digest))]);
+        var agent = new ProductManagerAgent(
+            NullLogger<ProductManagerAgent>.Instance,
+            new ProductManagerOrchestrator(NullLogger<ProductManagerOrchestrator>.Instance));
+
+        var result = await agent.HandleCoordinationTurnAsync(request, context, CancellationToken.None);
+
+        Assert.Equal(AgentCoordinationDispositions.Completed, result.Disposition);
+        Assert.NotNull(written);
+        Assert.Equal("product-manager.game-vision-charter", written!.StateKey);
+        Assert.Equal(digest, written.DecisionFingerprint);
+        Assert.Equal("product-management.game-vision-acknowledgement.v1", result.Artifact?.Type);
+        Assert.NotNull(result.Artifact);
+        Assert.Equal(digest, result.Artifact!.Payload.GetProperty("acceptedPitchDigest").GetString());
+        Assert.True(result.Artifact.Payload.GetProperty("acknowledged").GetBoolean());
+        Assert.Equal(0, result.Artifact.Payload.GetProperty("blockers").GetArrayLength());
+    }
+
+    [Fact]
     public void RoleCapabilities_EnforcePlatformCapabilitiesButTreatDomainSkillsAsSpecializations()
     {
         var role = Role("game-architect", "Game Architect", 1, "Now") with
@@ -152,7 +208,7 @@ public sealed class ProductManagerProfileTests
         var root = document.RootElement;
         Assert.Equal(AgentRolePolicyProfiles.Manager,
             root.GetProperty("rolePolicy").GetProperty("profile").GetString());
-        Assert.Equal(["software-product-manager"],
+        Assert.Equal(["software-product-manager", "product-manager"],
             root.GetProperty("rolePolicy").GetProperty("declaredRoleKeys").EnumerateArray()
                 .Select(item => item.GetString()!).ToArray());
         Assert.All(root.GetProperty("provides").EnumerateArray(), capability =>
@@ -197,7 +253,7 @@ public sealed class ProductManagerProfileTests
             "src",
             "CSweet.Agent.SoftwareProductManager",
             "CSweet.Agent.SoftwareProductManager.csproj"));
-        Assert.Contains("CSweet.Agent.SDK\" Version=\"3.20.0", project, StringComparison.Ordinal);
+        Assert.Contains("CSweet.Agent.SDK\" Version=\"3.21.0", project, StringComparison.Ordinal);
         Assert.Contains("<ProjectReference", project, StringComparison.Ordinal);
         Assert.Contains($"<Version>{ProductManagerProfile.Version}</Version>", project, StringComparison.Ordinal);
     }
@@ -230,14 +286,14 @@ public sealed class ProductManagerProfileTests
         Assert.Contains("roadmap", ProductManagerProfile.SystemPrompt, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("success measures", ProductManagerProfile.SystemPrompt, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("at most two", ProductManagerProfile.SystemPrompt, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("directly message your CEO manager", ProductManagerProfile.SystemPrompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("directly message your current manager", ProductManagerProfile.SystemPrompt, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("approved organization and relationship memory", ProductManagerProfile.SystemPrompt, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Never open with a generic readiness message", ProductManagerProfile.SystemPrompt, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("Chief of Staff is your executive liaison, not your line manager", ProductManagerProfile.SystemPrompt, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("shares your CEO manager", ProductManagerProfile.SystemPrompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Chief of Staff is an executive liaison, not your line manager", ProductManagerProfile.SystemPrompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("accountable Creative Director", ProductManagerProfile.SystemPrompt, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Never maintain the Chief's hiring backlog", ProductManagerProfile.SystemPrompt, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Do not present a finalized role list", ProductManagerProfile.SystemPrompt, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("routes the request to your authoritative CEO manager", ProductManagerProfile.SystemPrompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("routes the request to your authoritative manager", ProductManagerProfile.SystemPrompt, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("a Chief-triggered update is not manager authorization", ProductManagerProfile.SystemPrompt, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Do not provide technical architecture", ProductManagerProfile.SystemPrompt, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("primary startup goal", ProductManagerProfile.SystemPrompt, StringComparison.OrdinalIgnoreCase);
@@ -291,8 +347,8 @@ public sealed class ProductManagerProfileTests
         Assert.Equal(ceoId, ProductManagerAgent.FindCeoManager(productManager, organization)?.Id);
         Assert.Null(ProductManagerAgent.FindChiefLiaison(
             productManager with { ReportsToId = Guid.NewGuid() }, organization));
-        Assert.Null(ProductManagerAgent.FindCeoManager(
-            productManager with { ReportsToId = chief.Id }, organization));
+        Assert.Equal(chief.Id, ProductManagerAgent.FindCeoManager(
+            productManager with { ReportsToId = chief.Id }, organization)?.Id);
         Assert.Null(ProductManagerAgent.FindChiefLiaison(
             productManager,
             organization with
