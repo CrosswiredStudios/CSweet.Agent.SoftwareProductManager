@@ -31,7 +31,16 @@ public sealed class ProductManagerProfileTests
                         request.Status, request.SourceRevisions, request.ConditionCodes,
                         request.DecisionFingerprint, request.OpenCommitmentCorrelations,
                         request.AttentionReviewId, request.Payload, 1, now, now));
-                });
+                })
+            .RegisterCapability<AddPersonalTodoItemRequest, PersonalTodoItem>(
+                PersonalTodoCapabilities.Add,
+                (request, _) => Task.FromResult(new PersonalTodoItem(
+                    Guid.NewGuid(), Guid.NewGuid(), productManagerId, productManagerId,
+                    ProductManagerProfile.DefaultDisplayName, request.Title,
+                    request.Description ?? string.Empty, PersonalTodoStatuses.Ready,
+                    request.Priority, 1024, 1, null, request.SourceConversationId,
+                    request.SourceMessageId, [], null, null, DateTimeOffset.UtcNow,
+                    DateTimeOffset.UtcNow)));
         var context = runtime.CreateContext(
             Guid.NewGuid().ToString("D"), Guid.NewGuid().ToString("D"),
             new AgentIdentity(productManagerId.ToString("D"), "Product Manager", null,
@@ -219,6 +228,7 @@ public sealed class ProductManagerProfileTests
         Assert.Equal(
             [
                 PersonalTodoEvents.Available,
+                ArtifactEvents.AccessDecision,
                 CommunicationEvents.MessageMentioned,
                 ProductManagerProfile.OnboardedEvent,
                 ProductManagerProfile.UserMessageReceivedEvent,
@@ -253,7 +263,7 @@ public sealed class ProductManagerProfileTests
             "src",
             "CSweet.Agent.SoftwareProductManager",
             "CSweet.Agent.SoftwareProductManager.csproj"));
-        Assert.Contains("CSweet.Agent.SDK\" Version=\"3.21.0", project, StringComparison.Ordinal);
+        Assert.Contains("CSweet.Agent.SDK\" Version=\"3.23.0", project, StringComparison.Ordinal);
         Assert.Contains("<ProjectReference", project, StringComparison.Ordinal);
         Assert.Contains($"<Version>{ProductManagerProfile.Version}</Version>", project, StringComparison.Ordinal);
     }

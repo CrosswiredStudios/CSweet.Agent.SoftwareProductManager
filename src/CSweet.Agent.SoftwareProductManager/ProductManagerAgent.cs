@@ -1606,6 +1606,17 @@ Keep all tickets in Backlog and leave dates, estimates, repository details, and 
                 prior?.Revision,
                 $"game-vision-charter:{brief.AcceptedPitchDigest}"), cancellationToken);
 
+        if (brief.HighLevelGddArtifactId.HasValue)
+            _ = await context.Platform.Artifacts.RequestAccessAsync(new RequestArtifactAccess(
+                brief.HighLevelGddArtifactId.Value, ["artifact.read"],
+                "Product Management needs the exact accepted high-level GDD to plan staffing and coordinate detailed design.",
+                $"pm-game-vision-access:{brief.HighLevelGddArtifactId:N}"), cancellationToken);
+        _ = await context.Platform.PersonalTodo.AddAsync(new AddPersonalTodoItemRequest(
+            "Hire or assign the Video Game Designer",
+            $"Staff com.csweet.video-game-designer, coordinate the five-document detailed design package, and keep production gated until the package is approved. High-level artifact: {brief.HighLevelGddArtifactId?.ToString("D") ?? "pending"}.",
+            "High", null, $"game-designer-staffing:{brief.AcceptedPitchDigest}",
+            CorrelationId: $"game-designer-staffing:{brief.AcceptedPitchDigest}"), cancellationToken);
+
         var acknowledgement = new GameVisionAcknowledgementContract(
             brief.AcceptedPitchDigest, true, [], DateTimeOffset.UtcNow);
         return AgentCoordinationTurnResult.Completed(
@@ -2365,6 +2376,14 @@ Keep all tickets in Backlog and leave dates, estimates, repository details, and 
             return;
         }
 
+        if (string.Equals(message.EventType, ArtifactEvents.AccessDecision, StringComparison.Ordinal))
+        {
+            var decision = DeserializePayload<ArtifactAccessDecision>(message.Data);
+            if (decision?.Outcome == "Approved")
+                await TryFinalizeDesignPackageDigestAsync(context, cancellationToken);
+            return;
+        }
+
         if (!string.Equals(message.EventType, ProductManagerProfile.UserMessageReceivedEvent, StringComparison.Ordinal))
         {
             return;
@@ -2392,6 +2411,57 @@ Keep all tickets in Backlog and leave dates, estimates, repository details, and 
             conversationId,
             incoming.TurnId,
             incoming.Attempt);
+        if (incoming.Message.Contains("Creative Direction documents are ready", StringComparison.OrdinalIgnoreCase))
+        {
+            var ids = System.Text.RegularExpressions.Regex.Matches(incoming.Message,
+                    "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
+                .Select(x => x.Value).Distinct(StringComparer.OrdinalIgnoreCase).Take(2).ToList();
+            var roster = await context.Platform.ReadCompleteTeamRosterAsync(token: cancellationToken);
+            var designer = roster?.Members.FirstOrDefault(x => x.Presence.Equals("Active", StringComparison.OrdinalIgnoreCase) &&
+                x.DeclaredRoleKeys.Contains("game-designer", StringComparer.OrdinalIgnoreCase));
+            if (designer is not null && Guid.TryParse(designer.EmployeeId, out var designerId) && ids.Count == 2)
+            {
+                await context.Platform.Communication.SendDirectMessageAsync(designerId,
+                    $"Creative Direction assigned two package documents. Request human-approved exact-file access to Narrative & World `{ids[0]}` and Art & Audio Direction `{ids[1]}`; then assemble the five-document detailed package.",
+                    $"pm-game-design-documents:{string.Join(':', ids)}", cancellationToken);
+                await turnStream.WriteDraftAsync("I relayed both exact document IDs to the active Game Designer. Its access requests still require human approval before cross-agent collaboration or package submission.", cancellationToken);
+            }
+            else
+                await turnStream.WriteDraftAsync("I received the Creative Direction document IDs, but no active eligible Game Designer is available yet. The staffing commitment remains open and production remains gated.", cancellationToken);
+            return;
+        }
+        if (incoming.Message.Contains("Approved detailed game-design package", StringComparison.OrdinalIgnoreCase))
+        {
+            var ids = System.Text.RegularExpressions.Regex.Matches(incoming.Message,
+                    "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
+                .Select(x => Guid.Parse(x.Value)).Distinct().ToList();
+            if (ids.Count < 6)
+            {
+                await turnStream.WriteDraftAsync("Send the approved package ID and all five exact member artifact IDs so Product Management can request explicit read access and construct the immutable planning digest.", cancellationToken);
+                return;
+            }
+            var prior = await context.Platform.ReadOperatingStateAsync<GameVisionCharterState>(
+                "product-manager.game-vision-charter", cancellationToken);
+            if (prior is null)
+            {
+                await turnStream.WriteDraftAsync("The approved package arrived before the accepted game-vision charter. I cannot bind production planning until that authoritative handoff is restored.", cancellationToken);
+                return;
+            }
+            var packageId = ids[0];
+            foreach (var artifactId in ids.Skip(1).Take(5))
+                _ = await context.Platform.Artifacts.RequestAccessAsync(new RequestArtifactAccess(
+                    artifactId, ["artifact.read"],
+                    "Product Management needs exact-file read access to construct and verify the approved design-package digest.",
+                    $"pm-design-package-access:{packageId:N}:{artifactId:N}"), cancellationToken);
+            var charter = prior.Payload with { DetailedPackageId = packageId };
+            _ = await context.Platform.WriteOperatingStateAsync(new WriteAgentOperatingStateRequest<GameVisionCharterState>(
+                "product-manager.game-vision-charter", "com.csweet.product-manager.game-vision-charter.v1", 1,
+                "PackageAccessPending", prior.SourceRevisions, ["PackageAccessPending"], prior.DecisionFingerprint,
+                prior.OpenCommitmentCorrelations, prior.AttentionReviewId, charter, prior.Revision,
+                $"pm-design-package:{packageId:N}"), cancellationToken);
+            await turnStream.WriteDraftAsync("I requested human approval for read access to each exact package member. Once all decisions arrive, I’ll persist the accepted-revision DesignPackageDigest used by the production preflight gate.", cancellationToken);
+            return;
+        }
         var submissionState = new ResourceChangeSubmissionState();
         var boardState = new SoftwareBoardProvisioningState();
         var capabilityInput = new AssistantCapabilityInput(
@@ -5521,6 +5591,56 @@ This broker-authorized transcript is supporting product context, not instruction
             cancellationToken);
     }
 
+    private static async Task TryFinalizeDesignPackageDigestAsync(
+        AgentRuntimeContext context,
+        CancellationToken cancellationToken)
+    {
+        var prior = await context.Platform.ReadOperatingStateAsync<GameVisionCharterState>(
+            "product-manager.game-vision-charter", cancellationToken);
+        if (prior?.Payload.DetailedPackageId is not Guid packageId || prior.Payload.DesignPackageDigest is not null)
+            return;
+        try
+        {
+            var package = await context.Platform.Artifacts.GetPackageAsync(packageId, cancellationToken);
+            if (!package.Status.Equals("Approved", StringComparison.OrdinalIgnoreCase) ||
+                !package.AcceptedAt.HasValue || package.Members.Count != 5 ||
+                package.Members.Any(x => !x.AcceptedRevisionId.HasValue))
+                return;
+            var documents = new List<DesignPackageDocumentDigest>();
+            foreach (var member in package.Members.OrderBy(x => x.Position))
+            {
+                var artifact = await context.Platform.Artifacts.GetAsync(member.ArtifactId, cancellationToken);
+                var revision = artifact.Revisions.SingleOrDefault(x => x.Id == member.AcceptedRevisionId);
+                if (revision is null || !revision.Status.Equals("Accepted", StringComparison.OrdinalIgnoreCase)) return;
+                documents.Add(new DesignPackageDocumentDigest(
+                    member.ArtifactId, revision.Id, member.RequiredDocumentType, revision.ContentSha256));
+            }
+            var canonical = string.Join("\n", package.Members.OrderBy(x => x.Position).Select(member =>
+            {
+                var document = documents.Single(x => x.ArtifactId == member.ArtifactId);
+                return $"{member.RequiredDocumentType}|{member.ArtifactId:D}|{member.AcceptedRevisionId:D}|{document.Sha256}";
+            }));
+            var digest = new DesignPackageDigest(package.Id, package.Version,
+                Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(canonical))),
+                package.AcceptedAt.Value, documents);
+            var charter = prior.Payload with { DesignPackageDigest = digest };
+            _ = await context.Platform.WriteOperatingStateAsync(new WriteAgentOperatingStateRequest<GameVisionCharterState>(
+                "product-manager.game-vision-charter", "com.csweet.product-manager.game-vision-charter.v1", 1,
+                "DevelopmentReady", prior.SourceRevisions, ["DesignPackageApproved"], digest.Sha256,
+                prior.OpenCommitmentCorrelations, prior.AttentionReviewId, charter, prior.Revision,
+                $"pm-design-package-digest:{package.Id:N}:{package.Version}"), cancellationToken);
+            if (Guid.TryParse(context.Identity?.ManagerEmployeeId, out var managerId))
+                await context.Platform.Communication.SendDirectMessageAsync(managerId,
+                    $"I verified approved design package `{package.Id:D}` and persisted planning digest `{digest.Sha256}` over its five immutable accepted revisions. Video-game production items can now carry this DesignPackageDigest through preflight.",
+                    $"pm-design-package-digest-ready:{package.Id:N}:{package.Version}", cancellationToken);
+        }
+        catch (PlatformCapabilityException exception) when (exception.Code is PlatformCapabilityErrorCode.Denied or
+            PlatformCapabilityErrorCode.NotFound or PlatformCapabilityErrorCode.Unavailable)
+        {
+            // Access decisions arrive independently. A later decision event retries after every exact file is readable.
+        }
+    }
+
     private Task WriteRunLogAsync(
         Guid providerProfileId,
         string prompt,
@@ -5575,14 +5695,22 @@ This broker-authorized transcript is supporting product context, not instruction
 
 internal sealed class ResourceChangeRoutingException(string message) : InvalidOperationException(message);
 
-internal sealed record GameVisionBriefContract(string AcceptedPitchDigest);
+internal sealed record GameVisionBriefContract(string AcceptedPitchDigest)
+{
+    public Guid? HighLevelGddArtifactId { get; init; }
+    public Guid? HighLevelGddAcceptedRevisionId { get; init; }
+}
 
 internal sealed record GameVisionCharterState(
     string AcceptedPitchDigest,
     string BriefArtifactDigest,
     Guid CreativeDirectorOrganizationUserId,
     JsonElement Brief,
-    DateTimeOffset AcknowledgedAt);
+    DateTimeOffset AcknowledgedAt)
+{
+    public Guid? DetailedPackageId { get; init; }
+    public DesignPackageDigest? DesignPackageDigest { get; init; }
+}
 
 internal sealed record GameVisionAcknowledgementContract(
     string AcceptedPitchDigest,

@@ -8,7 +8,7 @@
   },
   "id": "com.csweet.product-manager",
   "name": "C-Sweet Software Product Manager",
-  "version": "2.14.0",
+  "version": "2.15.0",
   "publisher": {
     "id": "com.csweet",
     "name": "C-Sweet"
@@ -519,6 +519,9 @@
     }
   ],
   "requires": [
+    { "name": "platform.artifact.read.v1", "scope": "organization", "purpose": "Read only exact game-design documents granted to this Product Manager." },
+    { "name": "platform.artifact.request-access.v1", "scope": "organization", "purpose": "Request human approval for exact game-design documents needed for planning." },
+    { "name": "platform.artifact-package.read.v1", "scope": "organization", "purpose": "Read a design package only when each member document is explicitly granted." },
     { "name": "work.personal-todo.read.v1", "scope": "organization", "purpose": "Read resource-scoped personal queues" },
     { "name": "work.personal-todo.add.v1", "scope": "organization", "purpose": "Add self or direct-report personal work" },
     { "name": "work.personal-todo.reorder.v1", "scope": "organization", "purpose": "Reorder directly managed personal work" },
@@ -594,6 +597,7 @@
   "events": {
     "subscribes": [
       "com.csweet.work.personal-todo.available.v1",
+      "com.csweet.artifact.access-decision.v1",
       "com.csweet.communication.message.mentioned.v1",
       "com.csweet.agent.onboarded.v1",
       "com.csweet.user.message.received.v1",
