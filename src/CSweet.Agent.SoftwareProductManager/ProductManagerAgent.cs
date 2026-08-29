@@ -2380,7 +2380,7 @@ Keep all tickets in Backlog and leave dates, estimates, repository details, and 
         {
             var decision = DeserializePayload<ArtifactAccessDecision>(message.Data);
             if (decision?.Outcome == "Approved")
-                await TryFinalizeDesignPackageDigestAsync(context, cancellationToken);
+                await TryFinalizeArtifactPackageDigestAsync(context, cancellationToken);
             return;
         }
 
@@ -2459,7 +2459,7 @@ Keep all tickets in Backlog and leave dates, estimates, repository details, and 
                 "PackageAccessPending", prior.SourceRevisions, ["PackageAccessPending"], prior.DecisionFingerprint,
                 prior.OpenCommitmentCorrelations, prior.AttentionReviewId, charter, prior.Revision,
                 $"pm-design-package:{packageId:N}"), cancellationToken);
-            await turnStream.WriteDraftAsync("I requested human approval for read access to each exact package member. Once all decisions arrive, I’ll persist the accepted-revision DesignPackageDigest used by the production preflight gate.", cancellationToken);
+            await turnStream.WriteDraftAsync("I requested human approval for read access to each exact package member. Once all decisions arrive, I’ll persist the accepted-revision artifact-package digest as auditable planning evidence.", cancellationToken);
             return;
         }
         var submissionState = new ResourceChangeSubmissionState();
@@ -5591,13 +5591,13 @@ This broker-authorized transcript is supporting product context, not instruction
             cancellationToken);
     }
 
-    private static async Task TryFinalizeDesignPackageDigestAsync(
+    private static async Task TryFinalizeArtifactPackageDigestAsync(
         AgentRuntimeContext context,
         CancellationToken cancellationToken)
     {
         var prior = await context.Platform.ReadOperatingStateAsync<GameVisionCharterState>(
             "product-manager.game-vision-charter", cancellationToken);
-        if (prior?.Payload.DetailedPackageId is not Guid packageId || prior.Payload.DesignPackageDigest is not null)
+        if (prior?.Payload.DetailedPackageId is not Guid packageId || prior.Payload.ArtifactPackageDigest is not null)
             return;
         try
         {
@@ -5606,13 +5606,13 @@ This broker-authorized transcript is supporting product context, not instruction
                 !package.AcceptedAt.HasValue || package.Members.Count != 5 ||
                 package.Members.Any(x => !x.AcceptedRevisionId.HasValue))
                 return;
-            var documents = new List<DesignPackageDocumentDigest>();
+            var documents = new List<ArtifactPackageMemberDigest>();
             foreach (var member in package.Members.OrderBy(x => x.Position))
             {
                 var artifact = await context.Platform.Artifacts.GetAsync(member.ArtifactId, cancellationToken);
                 var revision = artifact.Revisions.SingleOrDefault(x => x.Id == member.AcceptedRevisionId);
                 if (revision is null || !revision.Status.Equals("Accepted", StringComparison.OrdinalIgnoreCase)) return;
-                documents.Add(new DesignPackageDocumentDigest(
+                documents.Add(new ArtifactPackageMemberDigest(
                     member.ArtifactId, revision.Id, member.RequiredDocumentType, revision.ContentSha256));
             }
             var canonical = string.Join("\n", package.Members.OrderBy(x => x.Position).Select(member =>
@@ -5620,10 +5620,10 @@ This broker-authorized transcript is supporting product context, not instruction
                 var document = documents.Single(x => x.ArtifactId == member.ArtifactId);
                 return $"{member.RequiredDocumentType}|{member.ArtifactId:D}|{member.AcceptedRevisionId:D}|{document.Sha256}";
             }));
-            var digest = new DesignPackageDigest(package.Id, package.Version,
+            var digest = new ArtifactPackageDigest(package.Id, package.Version,
                 Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(canonical))),
                 package.AcceptedAt.Value, documents);
-            var charter = prior.Payload with { DesignPackageDigest = digest };
+            var charter = prior.Payload with { ArtifactPackageDigest = digest };
             _ = await context.Platform.WriteOperatingStateAsync(new WriteAgentOperatingStateRequest<GameVisionCharterState>(
                 "product-manager.game-vision-charter", "com.csweet.product-manager.game-vision-charter.v1", 1,
                 "DevelopmentReady", prior.SourceRevisions, ["DesignPackageApproved"], digest.Sha256,
@@ -5631,7 +5631,7 @@ This broker-authorized transcript is supporting product context, not instruction
                 $"pm-design-package-digest:{package.Id:N}:{package.Version}"), cancellationToken);
             if (Guid.TryParse(context.Identity?.ManagerEmployeeId, out var managerId))
                 await context.Platform.Communication.SendDirectMessageAsync(managerId,
-                    $"I verified approved design package `{package.Id:D}` and persisted planning digest `{digest.Sha256}` over its five immutable accepted revisions. Video-game production items can now carry this DesignPackageDigest through preflight.",
+                    $"I verified approved design package `{package.Id:D}` and persisted planning digest `{digest.Sha256}` over its immutable accepted revisions as project evidence.",
                     $"pm-design-package-digest-ready:{package.Id:N}:{package.Version}", cancellationToken);
         }
         catch (PlatformCapabilityException exception) when (exception.Code is PlatformCapabilityErrorCode.Denied or
@@ -5709,7 +5709,7 @@ internal sealed record GameVisionCharterState(
     DateTimeOffset AcknowledgedAt)
 {
     public Guid? DetailedPackageId { get; init; }
-    public DesignPackageDigest? DesignPackageDigest { get; init; }
+    public ArtifactPackageDigest? ArtifactPackageDigest { get; init; }
 }
 
 internal sealed record GameVisionAcknowledgementContract(
