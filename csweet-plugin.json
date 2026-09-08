@@ -3,18 +3,28 @@
   "kind": "agent",
   "rolePolicy": {
     "profile": "manager.v1",
-    "declaredRoleKeys": ["software-product-manager", "product-manager"],
-    "specializationKeys": ["product-strategy", "software-delivery"]
+    "declaredRoleKeys": [
+      "software-product-manager",
+      "product-manager"
+    ],
+    "specializationKeys": [
+      "product-strategy",
+      "software-delivery"
+    ]
   },
   "id": "com.csweet.product-manager",
   "name": "Maya Patel",
-  "version": "2.15.0",
+  "version": "2.16.0",
   "publisher": {
     "id": "com.csweet",
     "name": "C-Sweet"
   },
   "workItemTypes": {
-    "requires": ["software.epic.v1", "software.story.v1", "software.task.v1"]
+    "requires": [
+      "software.epic.v1",
+      "software.story.v1",
+      "software.task.v1"
+    ]
   },
   "runtime": {
     "type": "dotnet-project",
@@ -36,42 +46,96 @@
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["providerProfileId", "conversationId", "prompt"],
+        "required": [
+          "providerProfileId",
+          "conversationId",
+          "prompt"
+        ],
         "properties": {
-          "providerProfileId": { "type": "string", "format": "uuid" },
-          "conversationId": { "type": "string", "minLength": 1 },
-          "prompt": { "type": "string", "minLength": 1 },
-          "context": {
-            "type": ["object", "null"],
-            "additionalProperties": { "type": "string" }
+          "providerProfileId": {
+            "type": "string",
+            "format": "uuid"
           },
-          "userId": { "type": ["string", "null"] },
-          "messageId": { "type": "string", "format": "uuid" },
-          "chatTurnId": { "type": "string", "format": "uuid" }
+          "conversationId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "prompt": {
+            "type": "string",
+            "minLength": 1
+          },
+          "context": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "userId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "messageId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "chatTurnId": {
+            "type": "string",
+            "format": "uuid"
+          }
         }
       },
       "outputSchema": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["conversationId", "response", "proposedActions", "createdAt"],
+        "required": [
+          "conversationId",
+          "response",
+          "proposedActions",
+          "createdAt"
+        ],
         "properties": {
-          "conversationId": { "type": "string" },
-          "response": { "type": "string" },
+          "conversationId": {
+            "type": "string"
+          },
+          "response": {
+            "type": "string"
+          },
           "proposedActions": {
             "type": "array",
             "items": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["actionType", "summary", "parametersJson", "requiresApproval"],
+              "required": [
+                "actionType",
+                "summary",
+                "parametersJson",
+                "requiresApproval"
+              ],
               "properties": {
-                "actionType": { "type": "string" },
-                "summary": { "type": "string" },
-                "parametersJson": { "type": "string" },
-                "requiresApproval": { "type": "boolean" }
+                "actionType": {
+                  "type": "string"
+                },
+                "summary": {
+                  "type": "string"
+                },
+                "parametersJson": {
+                  "type": "string"
+                },
+                "requiresApproval": {
+                  "type": "boolean"
+                }
               }
             }
           },
-          "createdAt": { "type": "string", "format": "date-time" }
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
         }
       },
       "executionTimeoutSeconds": 120,
@@ -83,42 +147,96 @@
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["providerProfileId", "conversationId", "prompt"],
+        "required": [
+          "providerProfileId",
+          "conversationId",
+          "prompt"
+        ],
         "properties": {
-          "providerProfileId": { "type": "string", "format": "uuid" },
-          "conversationId": { "type": "string", "minLength": 1 },
-          "prompt": { "type": "string", "minLength": 1 },
-          "context": {
-            "type": ["object", "null"],
-            "additionalProperties": { "type": "string" }
+          "providerProfileId": {
+            "type": "string",
+            "format": "uuid"
           },
-          "userId": { "type": ["string", "null"] },
-          "messageId": { "type": "string", "format": "uuid" },
-          "chatTurnId": { "type": "string", "format": "uuid" }
+          "conversationId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "prompt": {
+            "type": "string",
+            "minLength": 1
+          },
+          "context": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "userId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "messageId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "chatTurnId": {
+            "type": "string",
+            "format": "uuid"
+          }
         }
       },
       "outputSchema": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["conversationId", "response", "proposedActions", "createdAt"],
+        "required": [
+          "conversationId",
+          "response",
+          "proposedActions",
+          "createdAt"
+        ],
         "properties": {
-          "conversationId": { "type": "string" },
-          "response": { "type": "string" },
+          "conversationId": {
+            "type": "string"
+          },
+          "response": {
+            "type": "string"
+          },
           "proposedActions": {
             "type": "array",
             "items": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["actionType", "summary", "parametersJson", "requiresApproval"],
+              "required": [
+                "actionType",
+                "summary",
+                "parametersJson",
+                "requiresApproval"
+              ],
               "properties": {
-                "actionType": { "type": "string" },
-                "summary": { "type": "string" },
-                "parametersJson": { "type": "string" },
-                "requiresApproval": { "type": "boolean" }
+                "actionType": {
+                  "type": "string"
+                },
+                "summary": {
+                  "type": "string"
+                },
+                "parametersJson": {
+                  "type": "string"
+                },
+                "requiresApproval": {
+                  "type": "boolean"
+                }
               }
             }
           },
-          "createdAt": { "type": "string", "format": "date-time" }
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
         }
       },
       "executionTimeoutSeconds": 120,
@@ -130,42 +248,96 @@
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["providerProfileId", "conversationId", "prompt"],
+        "required": [
+          "providerProfileId",
+          "conversationId",
+          "prompt"
+        ],
         "properties": {
-          "providerProfileId": { "type": "string", "format": "uuid" },
-          "conversationId": { "type": "string", "minLength": 1 },
-          "prompt": { "type": "string", "minLength": 1 },
-          "context": {
-            "type": ["object", "null"],
-            "additionalProperties": { "type": "string" }
+          "providerProfileId": {
+            "type": "string",
+            "format": "uuid"
           },
-          "userId": { "type": ["string", "null"] },
-          "messageId": { "type": "string", "format": "uuid" },
-          "chatTurnId": { "type": "string", "format": "uuid" }
+          "conversationId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "prompt": {
+            "type": "string",
+            "minLength": 1
+          },
+          "context": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "userId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "messageId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "chatTurnId": {
+            "type": "string",
+            "format": "uuid"
+          }
         }
       },
       "outputSchema": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["conversationId", "response", "proposedActions", "createdAt"],
+        "required": [
+          "conversationId",
+          "response",
+          "proposedActions",
+          "createdAt"
+        ],
         "properties": {
-          "conversationId": { "type": "string" },
-          "response": { "type": "string" },
+          "conversationId": {
+            "type": "string"
+          },
+          "response": {
+            "type": "string"
+          },
           "proposedActions": {
             "type": "array",
             "items": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["actionType", "summary", "parametersJson", "requiresApproval"],
+              "required": [
+                "actionType",
+                "summary",
+                "parametersJson",
+                "requiresApproval"
+              ],
               "properties": {
-                "actionType": { "type": "string" },
-                "summary": { "type": "string" },
-                "parametersJson": { "type": "string" },
-                "requiresApproval": { "type": "boolean" }
+                "actionType": {
+                  "type": "string"
+                },
+                "summary": {
+                  "type": "string"
+                },
+                "parametersJson": {
+                  "type": "string"
+                },
+                "requiresApproval": {
+                  "type": "boolean"
+                }
               }
             }
           },
-          "createdAt": { "type": "string", "format": "date-time" }
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
         }
       },
       "executionTimeoutSeconds": 120,
@@ -177,65 +349,198 @@
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["cycleId", "checkInType", "periodStart", "periodEnd", "workstreamIds", "topics", "dueAt"],
+        "required": [
+          "cycleId",
+          "checkInType",
+          "periodStart",
+          "periodEnd",
+          "workstreamIds",
+          "topics",
+          "dueAt"
+        ],
         "properties": {
-          "cycleId": { "type": "string", "format": "uuid" },
-          "checkInType": { "type": "string" },
-          "periodStart": { "type": "string", "format": "date-time" },
-          "periodEnd": { "type": "string", "format": "date-time" },
+          "cycleId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "checkInType": {
+            "type": "string"
+          },
+          "periodStart": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "periodEnd": {
+            "type": "string",
+            "format": "date-time"
+          },
           "workstreamIds": {
             "type": "array",
-            "items": { "type": "string", "format": "uuid" }
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
           },
           "topics": {
             "type": "array",
-            "items": { "type": "string" }
+            "items": {
+              "type": "string"
+            }
           },
-          "dueAt": { "type": "string", "format": "date-time" },
-          "requestId": { "type": ["string", "null"], "format": "uuid" }
+          "dueAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "requestId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          }
         }
       },
       "outputSchema": {
         "type": "object",
         "additionalProperties": false,
         "required": [
-          "cycleId", "summary", "completedOutcomes", "inProgress", "blockers", "risks",
-          "resourceNeeds", "decisionsNeeded", "assumptions", "confidence", "reportedAt",
-          "immediateActions", "conversationTopics", "severity"
+          "cycleId",
+          "summary",
+          "completedOutcomes",
+          "inProgress",
+          "blockers",
+          "risks",
+          "resourceNeeds",
+          "decisionsNeeded",
+          "assumptions",
+          "confidence",
+          "reportedAt",
+          "immediateActions",
+          "conversationTopics",
+          "severity"
         ],
         "properties": {
-          "cycleId": { "type": "string", "format": "uuid" },
-          "summary": { "type": "string" },
-          "completedOutcomes": { "type": "array", "items": { "type": "string" } },
-          "inProgress": { "type": "array", "items": { "type": "string" } },
-          "blockers": { "type": "array", "items": { "type": "string" } },
-          "risks": { "type": "array", "items": { "type": "string" } },
+          "cycleId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "completedOutcomes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "inProgress": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "blockers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "risks": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
           "resourceNeeds": {
             "type": "array",
             "items": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["capability", "businessOutcome", "urgency", "evidence", "consequenceIfUnfilled"],
+              "required": [
+                "capability",
+                "businessOutcome",
+                "urgency",
+                "evidence",
+                "consequenceIfUnfilled"
+              ],
               "properties": {
-                "capability": { "type": "string" },
-                "businessOutcome": { "type": "string" },
-                "urgency": { "type": "string" },
-                "evidence": { "type": "string" },
-                "consequenceIfUnfilled": { "type": "string" },
-                "estimatedCost": { "type": ["number", "null"] },
-                "currency": { "type": ["string", "null"] }
+                "capability": {
+                  "type": "string"
+                },
+                "businessOutcome": {
+                  "type": "string"
+                },
+                "urgency": {
+                  "type": "string"
+                },
+                "evidence": {
+                  "type": "string"
+                },
+                "consequenceIfUnfilled": {
+                  "type": "string"
+                },
+                "estimatedCost": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "currency": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
               }
             }
           },
-          "decisionsNeeded": { "type": "array", "items": { "type": "string" } },
-          "assumptions": { "type": "array", "items": { "type": "string" } },
-          "confidence": { "type": "number" },
-          "reportedAt": { "type": "string", "format": "date-time" },
-          "requestId": { "type": ["string", "null"], "format": "uuid" },
-          "markdown": { "type": ["string", "null"] },
-          "immediateActions": { "type": "array", "items": { "type": "string" } },
-          "conversationTopics": { "type": "array", "items": { "type": "string" } },
-          "severity": { "type": "string" }
+          "decisionsNeeded": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "assumptions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "confidence": {
+            "type": "number"
+          },
+          "reportedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "requestId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "markdown": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "immediateActions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "conversationTopics": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "severity": {
+            "type": "string"
+          }
         }
       },
       "executionTimeoutSeconds": 60,
@@ -247,108 +552,265 @@
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["roleBrief", "focus", "sourceEventId", "idempotencyKey"],
+        "required": [
+          "roleBrief",
+          "focus",
+          "sourceEventId",
+          "idempotencyKey"
+        ],
         "properties": {
           "roleBrief": {
             "type": "object",
             "additionalProperties": false,
             "required": [
-              "status", "chiefOrganizationUserId", "productManagerOrganizationUserId",
-              "contextRevision", "mandate", "productOutcomes", "successMeasures",
-              "constraints", "decisionRights", "knownTeam", "missingInformation", "preparedAt"
+              "status",
+              "chiefOrganizationUserId",
+              "productManagerOrganizationUserId",
+              "contextRevision",
+              "mandate",
+              "productOutcomes",
+              "successMeasures",
+              "constraints",
+              "decisionRights",
+              "knownTeam",
+              "missingInformation",
+              "preparedAt"
             ],
             "properties": {
-              "status": { "type": "string" },
-              "chiefOrganizationUserId": { "type": "string", "format": "uuid" },
-              "productManagerOrganizationUserId": { "type": "string", "format": "uuid" },
-              "contextRevision": { "type": "integer" },
-              "mandate": { "type": "string" },
-              "productOutcomes": { "type": "array", "items": { "type": "string" } },
-              "successMeasures": { "type": "array", "items": { "type": "string" } },
-              "constraints": { "type": "array", "items": { "type": "string" } },
-              "decisionRights": { "type": "array", "items": { "type": "string" } },
-              "knownTeam": { "type": "array", "items": { "type": "string" } },
+              "status": {
+                "type": "string"
+              },
+              "chiefOrganizationUserId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "productManagerOrganizationUserId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "contextRevision": {
+                "type": "integer"
+              },
+              "mandate": {
+                "type": "string"
+              },
+              "productOutcomes": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "successMeasures": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "constraints": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "decisionRights": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "knownTeam": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
               "missingInformation": {
                 "type": "array",
                 "items": {
                   "type": "object",
                   "additionalProperties": false,
-                  "required": ["key", "question", "whyItMatters"],
+                  "required": [
+                    "key",
+                    "question",
+                    "whyItMatters"
+                  ],
                   "properties": {
-                    "key": { "type": "string" },
-                    "question": { "type": "string" },
-                    "whyItMatters": { "type": "string" }
+                    "key": {
+                      "type": "string"
+                    },
+                    "question": {
+                      "type": "string"
+                    },
+                    "whyItMatters": {
+                      "type": "string"
+                    }
                   }
                 }
               },
-              "preparedAt": { "type": "string", "format": "date-time" }
+              "preparedAt": {
+                "type": "string",
+                "format": "date-time"
+              }
             }
           },
-          "focus": { "type": "string" },
-          "sourceEventId": { "type": "string", "format": "uuid" },
-          "idempotencyKey": { "type": "string", "minLength": 1 }
+          "focus": {
+            "type": "string"
+          },
+          "sourceEventId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 1
+          }
         }
       },
       "outputSchema": {
         "type": "object",
         "additionalProperties": false,
         "required": [
-          "recommendation", "productStrategy", "roadmapThemes", "teamStructure",
-          "hiringSequence", "alternatives", "risks", "assumptions", "executiveDecisions",
-          "contextRevision", "preparedAt"
+          "recommendation",
+          "productStrategy",
+          "roadmapThemes",
+          "teamStructure",
+          "hiringSequence",
+          "alternatives",
+          "risks",
+          "assumptions",
+          "executiveDecisions",
+          "contextRevision",
+          "preparedAt"
         ],
         "properties": {
-          "recommendation": { "type": "string" },
-          "productStrategy": { "type": "array", "items": { "type": "string" } },
-          "roadmapThemes": { "type": "array", "items": { "type": "string" } },
+          "recommendation": {
+            "type": "string"
+          },
+          "productStrategy": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "roadmapThemes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
           "teamStructure": {
             "type": "array",
             "items": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["title", "purpose", "reportsTo", "timing", "priority"],
+              "required": [
+                "title",
+                "purpose",
+                "reportsTo",
+                "timing",
+                "priority"
+              ],
               "properties": {
-                "title": { "type": "string" },
-                "purpose": { "type": "string" },
-                "reportsTo": { "type": "string" },
-                "timing": { "type": "string" },
-                "priority": { "type": "integer" }
+                "title": {
+                  "type": "string"
+                },
+                "purpose": {
+                  "type": "string"
+                },
+                "reportsTo": {
+                  "type": "string"
+                },
+                "timing": {
+                  "type": "string"
+                },
+                "priority": {
+                  "type": "integer"
+                }
               }
             }
           },
-          "hiringSequence": { "type": "array", "items": { "type": "string" } },
+          "hiringSequence": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
           "alternatives": {
             "type": "array",
             "items": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["name", "tradeoff", "teamStructure"],
+              "required": [
+                "name",
+                "tradeoff",
+                "teamStructure"
+              ],
               "properties": {
-                "name": { "type": "string" },
-                "tradeoff": { "type": "string" },
+                "name": {
+                  "type": "string"
+                },
+                "tradeoff": {
+                  "type": "string"
+                },
                 "teamStructure": {
                   "type": "array",
                   "items": {
                     "type": "object",
                     "additionalProperties": false,
-                    "required": ["title", "purpose", "reportsTo", "timing", "priority"],
+                    "required": [
+                      "title",
+                      "purpose",
+                      "reportsTo",
+                      "timing",
+                      "priority"
+                    ],
                     "properties": {
-                      "title": { "type": "string" },
-                      "purpose": { "type": "string" },
-                      "reportsTo": { "type": "string" },
-                      "timing": { "type": "string" },
-                      "priority": { "type": "integer" }
+                      "title": {
+                        "type": "string"
+                      },
+                      "purpose": {
+                        "type": "string"
+                      },
+                      "reportsTo": {
+                        "type": "string"
+                      },
+                      "timing": {
+                        "type": "string"
+                      },
+                      "priority": {
+                        "type": "integer"
+                      }
                     }
                   }
                 }
               }
             }
           },
-          "risks": { "type": "array", "items": { "type": "string" } },
-          "assumptions": { "type": "array", "items": { "type": "string" } },
-          "executiveDecisions": { "type": "array", "items": { "type": "string" } },
-          "contextRevision": { "type": "integer" },
-          "preparedAt": { "type": "string", "format": "date-time" }
+          "risks": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "assumptions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "executiveDecisions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "contextRevision": {
+            "type": "integer"
+          },
+          "preparedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
         }
       },
       "executionTimeoutSeconds": 60,
@@ -360,57 +822,146 @@
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["roleBrief", "sourceEventId", "idempotencyKey"],
+        "required": [
+          "roleBrief",
+          "sourceEventId",
+          "idempotencyKey"
+        ],
         "properties": {
           "roleBrief": {
             "type": "object",
             "additionalProperties": false,
             "required": [
-              "status", "chiefOrganizationUserId", "productManagerOrganizationUserId",
-              "contextRevision", "mandate", "productOutcomes", "successMeasures",
-              "constraints", "decisionRights", "knownTeam", "missingInformation", "preparedAt"
+              "status",
+              "chiefOrganizationUserId",
+              "productManagerOrganizationUserId",
+              "contextRevision",
+              "mandate",
+              "productOutcomes",
+              "successMeasures",
+              "constraints",
+              "decisionRights",
+              "knownTeam",
+              "missingInformation",
+              "preparedAt"
             ],
             "properties": {
-              "status": { "type": "string" },
-              "chiefOrganizationUserId": { "type": "string", "format": "uuid" },
-              "productManagerOrganizationUserId": { "type": "string", "format": "uuid" },
-              "contextRevision": { "type": "integer" },
-              "mandate": { "type": "string" },
-              "productOutcomes": { "type": "array", "items": { "type": "string" } },
-              "successMeasures": { "type": "array", "items": { "type": "string" } },
-              "constraints": { "type": "array", "items": { "type": "string" } },
-              "decisionRights": { "type": "array", "items": { "type": "string" } },
-              "knownTeam": { "type": "array", "items": { "type": "string" } },
+              "status": {
+                "type": "string"
+              },
+              "chiefOrganizationUserId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "productManagerOrganizationUserId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "contextRevision": {
+                "type": "integer"
+              },
+              "mandate": {
+                "type": "string"
+              },
+              "productOutcomes": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "successMeasures": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "constraints": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "decisionRights": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "knownTeam": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
               "missingInformation": {
                 "type": "array",
                 "items": {
                   "type": "object",
                   "additionalProperties": false,
-                  "required": ["key", "question", "whyItMatters"],
+                  "required": [
+                    "key",
+                    "question",
+                    "whyItMatters"
+                  ],
                   "properties": {
-                    "key": { "type": "string" },
-                    "question": { "type": "string" },
-                    "whyItMatters": { "type": "string" }
+                    "key": {
+                      "type": "string"
+                    },
+                    "question": {
+                      "type": "string"
+                    },
+                    "whyItMatters": {
+                      "type": "string"
+                    }
                   }
                 }
               },
-              "preparedAt": { "type": "string", "format": "date-time" }
+              "preparedAt": {
+                "type": "string",
+                "format": "date-time"
+              }
             }
           },
-          "sourceEventId": { "type": "string", "format": "uuid" },
-          "idempotencyKey": { "type": "string", "minLength": 1 }
+          "sourceEventId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 1
+          }
         }
       },
       "outputSchema": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["acknowledged", "state", "planRefreshRequired", "materialChanges", "acknowledgedAt"],
+        "required": [
+          "acknowledged",
+          "state",
+          "planRefreshRequired",
+          "materialChanges",
+          "acknowledgedAt"
+        ],
         "properties": {
-          "acknowledged": { "type": "boolean" },
-          "state": { "type": "string" },
-          "planRefreshRequired": { "type": "boolean" },
-          "materialChanges": { "type": "array", "items": { "type": "string" } },
-          "acknowledgedAt": { "type": "string", "format": "date-time" }
+          "acknowledged": {
+            "type": "boolean"
+          },
+          "state": {
+            "type": "string"
+          },
+          "planRefreshRequired": {
+            "type": "boolean"
+          },
+          "materialChanges": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "acknowledgedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
         }
       },
       "executionTimeoutSeconds": 60,
@@ -426,40 +977,105 @@
       "outputSchema": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["agentId", "agentVersion", "schemaVersion", "fields", "settings"],
+        "required": [
+          "agentId",
+          "agentVersion",
+          "schemaVersion",
+          "fields",
+          "settings"
+        ],
         "properties": {
-          "agentId": { "type": "string" },
-          "agentVersion": { "type": "string" },
-          "schemaVersion": { "type": "string" },
+          "agentId": {
+            "type": "string"
+          },
+          "agentVersion": {
+            "type": "string"
+          },
+          "schemaVersion": {
+            "type": "string"
+          },
           "fields": {
             "type": "array",
             "items": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["key", "label", "type", "required"],
+              "required": [
+                "key",
+                "label",
+                "type",
+                "required"
+              ],
               "properties": {
-                "key": { "type": "string" },
-                "label": { "type": "string" },
-                "type": { "type": "string" },
-                "required": { "type": "boolean" },
-                "description": { "type": ["string", "null"] },
-                "placeholder": { "type": ["string", "null"] },
+                "key": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string"
+                },
+                "required": {
+                  "type": "boolean"
+                },
+                "description": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "placeholder": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
                 "options": {
-                  "type": ["array", "null"],
+                  "type": [
+                    "array",
+                    "null"
+                  ],
                   "items": {
                     "type": "object",
                     "additionalProperties": false,
-                    "required": ["value", "label"],
+                    "required": [
+                      "value",
+                      "label"
+                    ],
                     "properties": {
-                      "value": { "type": "string" },
-                      "label": { "type": "string" }
+                      "value": {
+                        "type": "string"
+                      },
+                      "label": {
+                        "type": "string"
+                      }
                     }
                   }
                 },
-                "minimum": { "type": ["number", "null"] },
-                "maximum": { "type": ["number", "null"] },
-                "step": { "type": ["number", "null"] },
-                "dependsOnFieldKey": { "type": ["string", "null"] }
+                "minimum": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "maximum": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "step": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "dependsOnFieldKey": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
               }
             }
           },
@@ -467,9 +1083,15 @@
             "type": "object",
             "additionalProperties": false,
             "properties": {
-              "llmProviderId": { "type": "string" },
-              "llmModel": { "type": "string" },
-              "responseTone": { "type": "string" }
+              "llmProviderId": {
+                "type": "string"
+              },
+              "llmModel": {
+                "type": "string"
+              },
+              "responseTone": {
+                "type": "string"
+              }
             }
           }
         }
@@ -483,15 +1105,28 @@
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["settings"],
+        "required": [
+          "settings"
+        ],
         "properties": {
           "settings": {
             "type": "object",
             "additionalProperties": false,
             "properties": {
-              "llmProviderId": { "type": "string" },
-              "llmModel": { "type": "string" },
-              "responseTone": { "type": "string", "enum": ["concise", "balanced", "detailed"] }
+              "llmProviderId": {
+                "type": "string"
+              },
+              "llmModel": {
+                "type": "string"
+              },
+              "responseTone": {
+                "type": "string",
+                "enum": [
+                  "concise",
+                  "balanced",
+                  "detailed"
+                ]
+              }
             }
           }
         }
@@ -499,17 +1134,33 @@
       "outputSchema": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["succeeded", "settings"],
+        "required": [
+          "succeeded",
+          "settings"
+        ],
         "properties": {
-          "succeeded": { "type": "boolean" },
-          "message": { "type": ["string", "null"] },
+          "succeeded": {
+            "type": "boolean"
+          },
+          "message": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "settings": {
             "type": "object",
             "additionalProperties": false,
             "properties": {
-              "llmProviderId": { "type": "string" },
-              "llmModel": { "type": "string" },
-              "responseTone": { "type": "string" }
+              "llmProviderId": {
+                "type": "string"
+              },
+              "llmModel": {
+                "type": "string"
+              },
+              "responseTone": {
+                "type": "string"
+              }
             }
           }
         }
@@ -519,83 +1170,395 @@
     }
   ],
   "requires": [
-    { "name": "platform.artifact.read.v1", "scope": "organization", "purpose": "Read only exact game-design documents granted to this Product Manager." },
-    { "name": "platform.artifact.request-access.v1", "scope": "organization", "purpose": "Request human approval for exact game-design documents needed for planning." },
-    { "name": "platform.artifact-package.read.v1", "scope": "organization", "purpose": "Read a design package only when each member document is explicitly granted." },
-    { "name": "work.personal-todo.read.v1", "scope": "organization", "purpose": "Read resource-scoped personal queues" },
-    { "name": "work.personal-todo.add.v1", "scope": "organization", "purpose": "Add self or direct-report personal work" },
-    { "name": "work.personal-todo.reorder.v1", "scope": "organization", "purpose": "Reorder directly managed personal work" },
-    { "name": "work.personal-todo.requeue.v1", "scope": "organization", "purpose": "Requeue blocked or waiting personal work when authoritative state makes it actionable" },
-    { "name": "work.personal-todo.claim.v1", "scope": "organization", "purpose": "SDK-managed atomic personal work claims" },
-    { "name": "work.personal-todo.complete.v1", "scope": "organization", "purpose": "SDK-managed personal work completion" },
-    { "name": "work.personal-todo.block.v1", "scope": "organization", "purpose": "SDK-managed durable personal work blocking" },
-    { "name": "work.personal-todo.release.v1", "scope": "organization", "purpose": "SDK-managed personal work release" },
-    { "name": "work.personal-todo.defer.v1", "scope": "organization", "purpose": "Durably wait until the next natural review without visible chatter" },
+    {
+      "name": "work.calendar.read.v1",
+      "scope": "organization",
+      "purpose": "Operate the business calendar within event ownership and reporting authority."
+    },
+    {
+      "name": "work.calendar.create.v1",
+      "scope": "organization",
+      "purpose": "Operate the business calendar within event ownership and reporting authority."
+    },
+    {
+      "name": "work.calendar.update.v1",
+      "scope": "organization",
+      "purpose": "Operate the business calendar within event ownership and reporting authority."
+    },
+    {
+      "name": "work.calendar.cancel.v1",
+      "scope": "organization",
+      "purpose": "Operate the business calendar within event ownership and reporting authority."
+    },
+    {
+      "name": "work.calendar.schedule.v1",
+      "scope": "organization",
+      "purpose": "Operate the business calendar within event ownership and reporting authority."
+    },
+    {
+      "name": "platform.artifact.read.v1",
+      "scope": "organization",
+      "purpose": "Read only exact game-design documents granted to this Product Manager."
+    },
+    {
+      "name": "platform.artifact.request-access.v1",
+      "scope": "organization",
+      "purpose": "Request human approval for exact game-design documents needed for planning."
+    },
+    {
+      "name": "platform.artifact-package.read.v1",
+      "scope": "organization",
+      "purpose": "Read a design package only when each member document is explicitly granted."
+    },
+    {
+      "name": "work.personal-todo.read.v1",
+      "scope": "organization",
+      "purpose": "Read resource-scoped personal queues"
+    },
+    {
+      "name": "work.personal-todo.add.v1",
+      "scope": "organization",
+      "purpose": "Add self or direct-report personal work"
+    },
+    {
+      "name": "work.personal-todo.reorder.v1",
+      "scope": "organization",
+      "purpose": "Reorder directly managed personal work"
+    },
+    {
+      "name": "work.personal-todo.requeue.v1",
+      "scope": "organization",
+      "purpose": "Requeue blocked or waiting personal work when authoritative state makes it actionable"
+    },
+    {
+      "name": "work.personal-todo.claim.v1",
+      "scope": "organization",
+      "purpose": "SDK-managed atomic personal work claims"
+    },
+    {
+      "name": "work.personal-todo.complete.v1",
+      "scope": "organization",
+      "purpose": "SDK-managed personal work completion"
+    },
+    {
+      "name": "work.personal-todo.block.v1",
+      "scope": "organization",
+      "purpose": "SDK-managed durable personal work blocking"
+    },
+    {
+      "name": "work.personal-todo.release.v1",
+      "scope": "organization",
+      "purpose": "SDK-managed personal work release"
+    },
+    {
+      "name": "work.personal-todo.defer.v1",
+      "scope": "organization",
+      "purpose": "Durably wait until the next natural review without visible chatter"
+    },
     {
       "name": "platform.team-roster.read.v1",
       "scope": "team",
       "purpose": "Read only this Software Product Manager employee's approved team roster and team-specific roles"
     },
-    { "name": "platform.user-input.request.v1", "scope": "organization", "purpose": "Ask the owner one bounded structured product question" },
-    { "name": "platform.llm.chat-stream.v1", "scope": "organization", "purpose": "Generate Software Product Manager responses" },
-    { "name": "platform.business-profile.read.v1", "scope": "organization", "purpose": "Ground advice in the authoritative business profile" },
-    { "name": "platform.business-profile.propose-update.v1", "scope": "organization", "purpose": "Propose sensitive or inferred business profile changes" },
-    { "name": "platform.organization.snapshot.read.v1", "scope": "organization", "purpose": "Inspect reporting lines, workstreams, roles, and available workers" },
-    { "name": "platform.business-pattern.search.v1", "scope": "organization", "purpose": "Find stage-appropriate operating patterns" },
-    { "name": "platform.finance-profile.read.v1", "scope": "organization", "purpose": "Ground staffing advice and revisions in financial controls" },
-    { "name": "platform.management-cycle.read.v1", "scope": "organization", "purpose": "Follow the configured management cadence" },
-    { "name": "memory.business.read.v1", "scope": "organization", "purpose": "Recall approved organization-wide business and product context" },
-    { "name": "memory.user.read.v1", "scope": "user", "purpose": "Recall approved user context" },
-    { "name": "memory.user.propose.v1", "scope": "user", "purpose": "Propose user memories" },
-    { "name": "communication.chat.read.v1", "scope": "team", "purpose": "Read broker-authorized manager and team planning conversations" },
-    { "name": "agent.onboarding.complete.v1", "scope": "organization", "purpose": "Acknowledge completion of this installation's durable onboarding event" },
-    { "name": "communication.chat.create.v1", "scope": "team", "purpose": "Open or reuse a direct PM-Architect planning conversation" },
-    { "name": "communication.chat.modify.v1", "scope": "team", "purpose": "Reconcile an authorized private team conversation" },
-    { "name": "communication.message.send.v1", "scope": "team", "purpose": "Coordinate product decisions and planning revisions with authorized team members" },
-    { "name": "communication.coordination.start.v1", "scope": "team", "purpose": "Start the one durable PM-Architect planning collaboration" },
-    { "name": "communication.coordination.start-board.v1", "scope": "team", "purpose": "Start or resume visible board-scoped planning review with the designated Architect", "modelVisible": false },
-    { "name": "communication.coordination.respond.v1", "scope": "team", "purpose": "Submit one structured product collaboration disposition" },
-    { "name": "communication.coordination.read.v1", "scope": "team", "purpose": "Read the PM-Architect collaboration session" },
-    { "name": "communication.coordination.list.v1", "scope": "team", "purpose": "List the Product Manager's own planning sessions for deterministic recovery" },
-    { "name": "communication.coordination.resume.v1", "scope": "team", "purpose": "Resume a failed Product Manager-initiated planning session" },
-    { "name": "communication.coordination.cancel.v1", "scope": "team", "purpose": "Stop an authorized PM-Architect collaboration" },
-    { "name": "platform.management.resource-change.propose.v1", "scope": "organization", "purpose": "Propose one atomic desired-team snapshot to the current manager", "modelVisible": false },
-    { "name": "platform.management.resource-change.read.v1", "scope": "organization", "purpose": "Read the Software Product Manager's resource-change requests and decisions" },
-    { "name": "platform.management.staffing-replenishment.propose.v1", "scope": "team", "purpose": "Propose one deduplicated governed replacement plan when approved viable capacity is lost" },
-    { "name": "platform.management.staffing-replenishment.read.v1", "scope": "team", "purpose": "Reconcile replacement requests and manager decisions" },
-    { "name": "platform.agent-operating-state.read.v1", "scope": "organization", "purpose": "Read the previous typed PM assessment checkpoint" },
-    { "name": "platform.agent-operating-state.write.v1", "scope": "organization", "purpose": "Persist a revision-safe typed PM assessment after authoritative reconciliation" },
-    { "name": "work.board.create", "scope": "team", "purpose": "Create one software-team kanban board after manager approval", "modelVisible": false },
-    { "name": "work.board.read", "scope": "team", "purpose": "Read the approved software team's board and exact workflow columns" },
-    { "name": "work.board.configure", "scope": "team", "purpose": "Set or correct the concise outcome-focused name of the Product Manager's board", "modelVisible": false },
-    { "name": "work.board.columns.configure", "scope": "team", "purpose": "Configure the approved software team's seven-column workflow", "modelVisible": false },
-    { "name": "work.item.read", "scope": "team", "purpose": "Read published sprint tickets before revision-safe readiness moves" },
-    { "name": "work.item.types.read.v1", "scope": "organization", "purpose": "Resolve the platform-owned software work type catalog" },
-    { "name": "work.item.planning.revise.v1", "scope": "team", "purpose": "Apply PM-approved Architect recommendations with planning-revision concurrency" },
-    { "name": "work.item.approval.decide.v1", "scope": "team", "purpose": "Record a manager-authorized architecture waiver when the approved team design omits an Architect", "modelVisible": false },
-    { "name": "work.item.create", "scope": "team", "purpose": "Create idempotent decision-ready planning tickets during approved agent collaboration" },
-    { "name": "work.item.comment", "scope": "team", "purpose": "Record authoritative product-context decisions on affected planning tickets" },
-    { "name": "work.item.move", "scope": "team", "purpose": "Move the first planned sprint's Stories and Tasks to Ready For Development" },
-    { "name": "work.item.delivery.finalize", "scope": "team", "purpose": "Bind repository, accountable PM, and exact Development and independent QA principals before readiness" },
-    { "name": "work.sprint.read", "scope": "team", "purpose": "Verify planned sprint groupings and recover durable PM-Architect planning sessions" },
-    { "name": "work.sprint.create", "scope": "team", "purpose": "Create idempotent Planned sprints while refining one approved Epic at a time" },
-    { "name": "work.sprint.scope.manage", "scope": "team", "purpose": "Place approved Stories into Planned sprints without starting execution" },
-    { "name": "work.sprint.report.read", "scope": "team", "purpose": "Monitor active delivery forecast, blockers, stage failures, and QA rework" },
-    { "name": "work.orchestration.software-template.configure", "scope": "team", "purpose": "Publish the bounded software delivery policy for the approved team board", "modelVisible": false },
-    { "name": "work.orchestration.preflight", "scope": "team", "purpose": "Validate the selected sprint before Product Manager activation" },
-    { "name": "work.orchestration.start", "scope": "team", "purpose": "Explicitly activate one ready sprint as its assigned board manager" },
-    { "name": "work.orchestration.read", "scope": "team", "purpose": "Read authoritative execution and stage state without mutating executing snapshots" },
-    { "name": "source-control.repository.team-options.v2", "scope": "team", "purpose": "Present only code projects enabled by the current team's delivery policy" },
-    { "name": "source-control.repository.provision.v2", "scope": "organization", "purpose": "Request one policy-bounded private Managed GitHub project when explicitly granted" },
-    { "name": "management.product-role-brief.v1", "scope": "organization", "purpose": "Request an authoritative role brief from the active Chief of Staff sharing the CEO manager" },
-    { "name": "management.product-plan.review.v1", "scope": "organization", "purpose": "Submit the initial product and product-team recommendation to the CEO-peer Chief of Staff for reconciliation" },
-    { "name": "management.product-escalation.v1", "scope": "organization", "purpose": "Route executive information gaps and decisions through the CEO-peer Chief of Staff liaison" },
-    { "name": "software-architecture.design.v2", "scope": "team", "purpose": "Compatibility-only typed architecture surface invoked by deterministic PM coordination", "modelVisible": false },
-    { "name": "software-architecture.publish-plan.v2", "scope": "team", "purpose": "Compatibility-only full publication surface retained during migration", "modelVisible": false },
-    { "name": "software-architecture.publish-story-tasks.v1", "scope": "team", "purpose": "Publish one PM-approved page of junior-ready Tasks beneath one Story through deterministic coordination", "modelVisible": false }
+    {
+      "name": "platform.user-input.request.v1",
+      "scope": "organization",
+      "purpose": "Ask the owner one bounded structured product question"
+    },
+    {
+      "name": "platform.llm.chat-stream.v1",
+      "scope": "organization",
+      "purpose": "Generate Software Product Manager responses"
+    },
+    {
+      "name": "platform.business-profile.read.v1",
+      "scope": "organization",
+      "purpose": "Ground advice in the authoritative business profile"
+    },
+    {
+      "name": "platform.business-profile.propose-update.v1",
+      "scope": "organization",
+      "purpose": "Propose sensitive or inferred business profile changes"
+    },
+    {
+      "name": "platform.organization.snapshot.read.v1",
+      "scope": "organization",
+      "purpose": "Inspect reporting lines, workstreams, roles, and available workers"
+    },
+    {
+      "name": "platform.business-pattern.search.v1",
+      "scope": "organization",
+      "purpose": "Find stage-appropriate operating patterns"
+    },
+    {
+      "name": "platform.finance-profile.read.v1",
+      "scope": "organization",
+      "purpose": "Ground staffing advice and revisions in financial controls"
+    },
+    {
+      "name": "platform.management-cycle.read.v1",
+      "scope": "organization",
+      "purpose": "Follow the configured management cadence"
+    },
+    {
+      "name": "memory.business.read.v1",
+      "scope": "organization",
+      "purpose": "Recall approved organization-wide business and product context"
+    },
+    {
+      "name": "memory.user.read.v1",
+      "scope": "user",
+      "purpose": "Recall approved user context"
+    },
+    {
+      "name": "memory.user.propose.v1",
+      "scope": "user",
+      "purpose": "Propose user memories"
+    },
+    {
+      "name": "communication.chat.read.v1",
+      "scope": "team",
+      "purpose": "Read broker-authorized manager and team planning conversations"
+    },
+    {
+      "name": "agent.onboarding.complete.v1",
+      "scope": "organization",
+      "purpose": "Acknowledge completion of this installation's durable onboarding event"
+    },
+    {
+      "name": "communication.chat.create.v1",
+      "scope": "team",
+      "purpose": "Open or reuse a direct PM-Architect planning conversation"
+    },
+    {
+      "name": "communication.chat.modify.v1",
+      "scope": "team",
+      "purpose": "Reconcile an authorized private team conversation"
+    },
+    {
+      "name": "communication.message.send.v1",
+      "scope": "team",
+      "purpose": "Coordinate product decisions and planning revisions with authorized team members"
+    },
+    {
+      "name": "communication.coordination.start.v1",
+      "scope": "team",
+      "purpose": "Start the one durable PM-Architect planning collaboration"
+    },
+    {
+      "name": "communication.coordination.start-board.v1",
+      "scope": "team",
+      "purpose": "Start or resume visible board-scoped planning review with the designated Architect",
+      "modelVisible": false
+    },
+    {
+      "name": "communication.coordination.respond.v1",
+      "scope": "team",
+      "purpose": "Submit one structured product collaboration disposition"
+    },
+    {
+      "name": "communication.coordination.read.v1",
+      "scope": "team",
+      "purpose": "Read the PM-Architect collaboration session"
+    },
+    {
+      "name": "communication.coordination.list.v1",
+      "scope": "team",
+      "purpose": "List the Product Manager's own planning sessions for deterministic recovery"
+    },
+    {
+      "name": "communication.coordination.resume.v1",
+      "scope": "team",
+      "purpose": "Resume a failed Product Manager-initiated planning session"
+    },
+    {
+      "name": "communication.coordination.cancel.v1",
+      "scope": "team",
+      "purpose": "Stop an authorized PM-Architect collaboration"
+    },
+    {
+      "name": "platform.management.resource-change.propose.v1",
+      "scope": "organization",
+      "purpose": "Propose one atomic desired-team snapshot to the current manager",
+      "modelVisible": false
+    },
+    {
+      "name": "platform.management.resource-change.read.v1",
+      "scope": "organization",
+      "purpose": "Read the Software Product Manager's resource-change requests and decisions"
+    },
+    {
+      "name": "platform.management.staffing-replenishment.propose.v1",
+      "scope": "team",
+      "purpose": "Propose one deduplicated governed replacement plan when approved viable capacity is lost"
+    },
+    {
+      "name": "platform.management.staffing-replenishment.read.v1",
+      "scope": "team",
+      "purpose": "Reconcile replacement requests and manager decisions"
+    },
+    {
+      "name": "platform.agent-operating-state.read.v1",
+      "scope": "organization",
+      "purpose": "Read the previous typed PM assessment checkpoint"
+    },
+    {
+      "name": "platform.agent-operating-state.write.v1",
+      "scope": "organization",
+      "purpose": "Persist a revision-safe typed PM assessment after authoritative reconciliation"
+    },
+    {
+      "name": "work.board.create",
+      "scope": "team",
+      "purpose": "Create one software-team kanban board after manager approval",
+      "modelVisible": false
+    },
+    {
+      "name": "work.board.read",
+      "scope": "team",
+      "purpose": "Read the approved software team's board and exact workflow columns"
+    },
+    {
+      "name": "work.board.configure",
+      "scope": "team",
+      "purpose": "Set or correct the concise outcome-focused name of the Product Manager's board",
+      "modelVisible": false
+    },
+    {
+      "name": "work.board.columns.configure",
+      "scope": "team",
+      "purpose": "Configure the approved software team's seven-column workflow",
+      "modelVisible": false
+    },
+    {
+      "name": "work.item.read",
+      "scope": "team",
+      "purpose": "Read published sprint tickets before revision-safe readiness moves"
+    },
+    {
+      "name": "work.item.types.read.v1",
+      "scope": "organization",
+      "purpose": "Resolve the platform-owned software work type catalog"
+    },
+    {
+      "name": "work.item.planning.revise.v1",
+      "scope": "team",
+      "purpose": "Apply PM-approved Architect recommendations with planning-revision concurrency"
+    },
+    {
+      "name": "work.item.approval.decide.v1",
+      "scope": "team",
+      "purpose": "Record a manager-authorized architecture waiver when the approved team design omits an Architect",
+      "modelVisible": false
+    },
+    {
+      "name": "work.item.create",
+      "scope": "team",
+      "purpose": "Create idempotent decision-ready planning tickets during approved agent collaboration"
+    },
+    {
+      "name": "work.item.comment",
+      "scope": "team",
+      "purpose": "Record authoritative product-context decisions on affected planning tickets"
+    },
+    {
+      "name": "work.item.move",
+      "scope": "team",
+      "purpose": "Move the first planned sprint's Stories and Tasks to Ready For Development"
+    },
+    {
+      "name": "work.item.delivery.finalize",
+      "scope": "team",
+      "purpose": "Bind repository, accountable PM, and exact Development and independent QA principals before readiness"
+    },
+    {
+      "name": "work.sprint.read",
+      "scope": "team",
+      "purpose": "Verify planned sprint groupings and recover durable PM-Architect planning sessions"
+    },
+    {
+      "name": "work.sprint.create",
+      "scope": "team",
+      "purpose": "Create idempotent Planned sprints while refining one approved Epic at a time"
+    },
+    {
+      "name": "work.sprint.scope.manage",
+      "scope": "team",
+      "purpose": "Place approved Stories into Planned sprints without starting execution"
+    },
+    {
+      "name": "work.sprint.report.read",
+      "scope": "team",
+      "purpose": "Monitor active delivery forecast, blockers, stage failures, and QA rework"
+    },
+    {
+      "name": "work.orchestration.software-template.configure",
+      "scope": "team",
+      "purpose": "Publish the bounded software delivery policy for the approved team board",
+      "modelVisible": false
+    },
+    {
+      "name": "work.orchestration.preflight",
+      "scope": "team",
+      "purpose": "Validate the selected sprint before Product Manager activation"
+    },
+    {
+      "name": "work.orchestration.start",
+      "scope": "team",
+      "purpose": "Explicitly activate one ready sprint as its assigned board manager"
+    },
+    {
+      "name": "work.orchestration.read",
+      "scope": "team",
+      "purpose": "Read authoritative execution and stage state without mutating executing snapshots"
+    },
+    {
+      "name": "source-control.repository.team-options.v2",
+      "scope": "team",
+      "purpose": "Present only code projects enabled by the current team's delivery policy"
+    },
+    {
+      "name": "source-control.repository.provision.v2",
+      "scope": "organization",
+      "purpose": "Request one policy-bounded private Managed GitHub project when explicitly granted"
+    },
+    {
+      "name": "management.product-role-brief.v1",
+      "scope": "organization",
+      "purpose": "Request an authoritative role brief from the active Chief of Staff sharing the CEO manager"
+    },
+    {
+      "name": "management.product-plan.review.v1",
+      "scope": "organization",
+      "purpose": "Submit the initial product and product-team recommendation to the CEO-peer Chief of Staff for reconciliation"
+    },
+    {
+      "name": "management.product-escalation.v1",
+      "scope": "organization",
+      "purpose": "Route executive information gaps and decisions through the CEO-peer Chief of Staff liaison"
+    },
+    {
+      "name": "software-architecture.design.v2",
+      "scope": "team",
+      "purpose": "Compatibility-only typed architecture surface invoked by deterministic PM coordination",
+      "modelVisible": false
+    },
+    {
+      "name": "software-architecture.publish-plan.v2",
+      "scope": "team",
+      "purpose": "Compatibility-only full publication surface retained during migration",
+      "modelVisible": false
+    },
+    {
+      "name": "software-architecture.publish-story-tasks.v1",
+      "scope": "team",
+      "purpose": "Publish one PM-approved page of junior-ready Tasks beneath one Story through deterministic coordination",
+      "modelVisible": false
+    }
   ],
   "events": {
     "subscribes": [
+      "com.csweet.calendar.reminder-due.v1",
       "com.csweet.work.personal-todo.available.v1",
       "com.csweet.artifact.access-decision.v1",
       "com.csweet.communication.message.mentioned.v1",
@@ -636,9 +1599,18 @@
       "description": "Controls how much detail the employee uses in responses.",
       "defaultValue": "concise",
       "options": [
-        { "value": "concise", "label": "Concise" },
-        { "value": "balanced", "label": "Balanced" },
-        { "value": "detailed", "label": "Detailed" }
+        {
+          "value": "concise",
+          "label": "Concise"
+        },
+        {
+          "value": "balanced",
+          "label": "Balanced"
+        },
+        {
+          "value": "detailed",
+          "label": "Detailed"
+        }
       ]
     }
   ],
@@ -661,11 +1633,26 @@
     "accentColor": "#286653",
     "summary": "Owns software product outcomes, customer discovery, strategy, prioritization, roadmaps, requirements, and product-team design.",
     "category": "Product",
-    "role": { "key": "product-manager", "name": "Product Manager" },
-    "license": { "spdxId": "LicenseRef-Proprietary" },
+    "role": {
+      "key": "product-manager",
+      "name": "Product Manager"
+    },
+    "license": {
+      "spdxId": "LicenseRef-Proprietary"
+    },
     "iconUrls": [],
-    "roleAliases": ["Software Product Manager", "Software PM", "Product Lead", "Head of Product"],
-    "keywords": ["product strategy", "customer discovery", "roadmap", "prioritization"],
+    "roleAliases": [
+      "Software Product Manager",
+      "Software PM",
+      "Product Lead",
+      "Head of Product"
+    ],
+    "keywords": [
+      "product strategy",
+      "customer discovery",
+      "roadmap",
+      "prioritization"
+    ],
     "documentationUrl": "README.md"
   }
 }

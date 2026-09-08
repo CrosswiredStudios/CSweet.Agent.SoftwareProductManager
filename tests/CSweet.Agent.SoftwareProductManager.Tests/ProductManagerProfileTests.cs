@@ -226,7 +226,7 @@ public sealed class ProductManagerProfileTests
             Assert.False(capability.GetProperty("outputSchema").GetProperty("additionalProperties").GetBoolean());
         });
         Assert.Equal(
-            [
+            ["com.csweet.calendar.reminder-due.v1", 
                 PersonalTodoEvents.Available,
                 ArtifactEvents.AccessDecision,
                 CommunicationEvents.MessageMentioned,

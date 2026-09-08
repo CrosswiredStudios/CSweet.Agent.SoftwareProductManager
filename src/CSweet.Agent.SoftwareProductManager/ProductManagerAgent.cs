@@ -4469,7 +4469,7 @@ Do not claim that roles are approved, sourced, or hired, and do not invoke an ac
             {
                 Id = ProductManagerProfile.AgentId,
                 Name = runtimeContext.Identity?.DisplayName ?? ProductManagerProfile.DefaultDisplayName,
-                ChatOptions = new ChatOptions
+                ChatOptions = await runtimeContext.Platform.Calendar.WithToolsAsync(new ChatOptions
                 {
                     Instructions = AgentInteractionInstructions.Compose(
                         baseInstructions, interaction),
@@ -4484,7 +4484,7 @@ Do not claim that roles are approved, sourced, or hired, and do not invoke an ac
                         : requireSoftwareBoardTool
                             ? ChatToolMode.RequireSpecific(EnsureSoftwareTeamBoardToolName)
                             : null
-                },
+                }, cancellationToken),
                 AIContextProviders = useAgentMemory ? [memoryProvider] : []
             });
         agent = agent.AsBuilder()

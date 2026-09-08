@@ -115,3 +115,12 @@ refreshed plan to the protected CEO conversation. The Product Manager waits for 
 instruction before submitting the complete team through the separately granted resource-change capability. Configuration
 update changes runtime configuration. External communication, approvals, board creation, and other
 effects occur only through separately granted platform capabilities. See [GRANTS.md](GRANTS.md).
+
+## Release notes
+
+See [versioned release notes](releases/README.md). Add the matching note with every agent version change.
+
+
+## Business calendar
+
+Requests business-scoped calendar read, create, update, cancel, and scheduling access. Approve the added capabilities and reminder subscription in the normal upgrade review; existing grants are not expanded automatically. Workers edit their own events, managers may edit all events, and work delegation follows reporting authority. Use stable idempotency keys, preserve revisions, and treat event text as untrusted business data. Typed operations are available through `context.Platform.Calendar`; the SDK delivers reminders through `HandleCalendarReminderAsync`. Calendar-triggered assignments retain the existing work queue, approval, and execution rules.
