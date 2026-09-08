@@ -7,7 +7,7 @@
     "specializationKeys": ["product-strategy", "software-delivery"]
   },
   "id": "com.csweet.product-manager",
-  "name": "C-Sweet Software Product Manager",
+  "name": "Maya Patel",
   "version": "2.15.0",
   "publisher": {
     "id": "com.csweet",
@@ -656,6 +656,9 @@
     }
   ],
   "catalog": {
+    "imageUrl": "https://raw.githubusercontent.com/CrosswiredStudios/CSweet.Agent.SoftwareProductManager/main/assets/branding/portrait-v1.jpg",
+    "companyLogoUrl": "https://raw.githubusercontent.com/CrosswiredStudios/CSweet.Agent.SoftwareProductManager/main/assets/branding/csweet-icon.svg",
+    "accentColor": "#286653",
     "summary": "Owns software product outcomes, customer discovery, strategy, prioritization, roadmaps, requirements, and product-team design.",
     "category": "Product",
     "role": { "key": "product-manager", "name": "Product Manager" },

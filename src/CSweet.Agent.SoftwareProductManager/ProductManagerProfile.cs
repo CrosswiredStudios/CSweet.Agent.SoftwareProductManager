@@ -6,7 +6,7 @@ public static class ProductManagerProfile
 {
     public const string AgentId = "com.csweet.product-manager";
     public const string Version = "2.15.0";
-    public const string DefaultDisplayName = "C-Sweet Software Product Manager";
+    public const string DefaultDisplayName = "Maya Patel";
     public const string AgentKey = "product-manager";
     public const string ConverseCapability = AssistantCapabilities.Converse;
     public const string SummarizeActivityCapability = AssistantCapabilities.SummarizeActivity;

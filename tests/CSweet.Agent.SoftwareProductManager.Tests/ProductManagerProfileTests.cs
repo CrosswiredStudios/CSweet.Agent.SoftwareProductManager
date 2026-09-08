@@ -153,7 +153,7 @@ public sealed class ProductManagerProfileTests
         using var document = JsonDocument.Parse(File.ReadAllText(ManifestPath()));
         var root = document.RootElement;
         Assert.Equal("com.csweet.product-manager", ProductManagerProfile.AgentId);
-        Assert.Equal("C-Sweet Software Product Manager", ProductManagerProfile.DefaultDisplayName);
+        Assert.Equal("Maya Patel", ProductManagerProfile.DefaultDisplayName);
         Assert.Equal(ProductManagerProfile.AgentId, root.GetProperty("id").GetString());
         Assert.Equal(ProductManagerProfile.DefaultDisplayName, root.GetProperty("name").GetString());
         Assert.Equal(ProductManagerProfile.Version, root.GetProperty("version").GetString());
