@@ -9,6 +9,7 @@ var manifest = await AgentManifestLoader.LoadAsync("csweet-plugin.json", Cancell
 if (manifest.Id != ProductManagerProfile.AgentId || manifest.Version != ProductManagerProfile.Version)
     throw new InvalidOperationException("The Software Product Manager implementation identity does not match csweet-plugin.json.");
 
+if (args.Contains("--self-test", StringComparer.OrdinalIgnoreCase)) { Console.WriteLine($"{manifest.Id} {manifest.Version}: manifest identity verified"); return; }
 builder.AddCSweetAgent<ProductManagerAgent>();
 builder.Services.AddSingleton<ProductManagerOrchestrator>();
 

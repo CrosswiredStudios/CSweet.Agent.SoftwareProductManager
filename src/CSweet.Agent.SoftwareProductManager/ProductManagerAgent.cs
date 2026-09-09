@@ -1349,7 +1349,7 @@ Keep all tickets in Backlog and leave dates, estimates, repository details, and 
          summary.Contains("runtime or transport", StringComparison.OrdinalIgnoreCase) ||
          summary.Contains("retryable=true", StringComparison.OrdinalIgnoreCase) ||
          summary.Contains("code=runtime.transport", StringComparison.OrdinalIgnoreCase) ||
-         // Compatibility recovery for sessions failed by SDK 3.19.0, which parsed an empty
+         // Compatibility recovery for sessions failed by SDK 3.40.0, which parsed an empty
          // rate-limit response as invalid JSON before checking the HTTP status.
          summary.Contains("code=agent.payload_invalid", StringComparison.OrdinalIgnoreCase) ||
          summary.Contains("The agent failed while processing the work item", StringComparison.OrdinalIgnoreCase));
