@@ -2,10 +2,10 @@
 
 This document is the human-readable grant catalog for the C-Sweet Software Product Manager agent. The source
 of truth for installation authorization remains [`csweet-plugin.json`](csweet-plugin.json). This
-catalog was last verified against package version `2.16.0` and manifest protocol `2.0`.
+catalog was last verified against package version `2.17.0` and manifest protocol `2.0`.
 
 Serialized capability names are sourced from the authoritative `CapabilityCatalog` in
-`CSweet.Agent.SDK` 3.40.0; manifest-audit tests reject names missing from that catalog.
+`CSweet.Agent.SDK` 3.47.0; manifest-audit tests reject names missing from that catalog.
 
 ## How to read this catalog
 
@@ -76,6 +76,8 @@ policy at runtime.
 | `work.item.read` | team | Read published tickets before revision-safe readiness moves. |
 | `work.item.create` | team | Create idempotent decision-ready planning tickets on the approved board. |
 | `work.item.comment` | team | Disseminate authoritative decisions to affected planning tickets. |
+| `work.item.comment.update.v1` | team | Correct this agent's own product-context comment on a planning ticket. |
+| `work.item.comment.delete.v1` | team | Retract this agent's own product-context comment while its activity history is retained. |
 | `work.item.move` | team | Move first-sprint Stories and Tasks to Ready For Development. |
 | `work.sprint.read` | team | Verify planned sprint groupings and recover durable planning after installation updates. |
 | `work.orchestration.software-template.configure` | team | Publish the bounded software delivery workflow. |

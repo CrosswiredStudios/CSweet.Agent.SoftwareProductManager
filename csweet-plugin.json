@@ -14,7 +14,7 @@
   },
   "id": "com.csweet.product-manager",
   "name": "Maya Patel",
-  "version": "2.16.0",
+  "version": "2.17.0",
   "publisher": {
     "id": "com.csweet",
     "name": "C-Sweet"
@@ -1460,6 +1460,16 @@
       "name": "work.item.comment",
       "scope": "team",
       "purpose": "Record authoritative product-context decisions on affected planning tickets"
+    },
+    {
+      "name": "work.item.comment.update.v1",
+      "scope": "team",
+      "purpose": "Correct this agent's own product-context comment on a planning ticket"
+    },
+    {
+      "name": "work.item.comment.delete.v1",
+      "scope": "team",
+      "purpose": "Retract this agent's own product-context comment while its activity history is retained"
     },
     {
       "name": "work.item.move",
