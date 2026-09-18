@@ -14,7 +14,7 @@ using CSweet.WorkManagement.Contracts;
 
 namespace CSweet.Agent.SoftwareProductManager;
 
-public sealed class ProductManagerAgent : CSweetAgentBase
+public sealed partial class ProductManagerAgent : CSweetAgentBase
 {
     private const string ArchitectRoleCategory = "software-architect";
     private const string DeveloperRoleCategory = "software-developer";
@@ -318,6 +318,7 @@ or denied. Otherwise perform the task and return a concise completion summary.
         };
         await PersistOperatingAssessmentAsync(
             review, assessment, fingerprint, openCommitments, prior, context, cancellationToken);
+        await ResumeProjectSetupAsync(context, cancellationToken);
     }
 
     private static async Task<AgentOperatingStateResponse?> TryReadOperatingStateAsync(
@@ -1558,6 +1559,8 @@ Keep all tickets in Backlog and leave dates, estimates, repository details, and 
     {
         var latestArtifact = request.Transcript.OrderByDescending(x => x.Ordinal)
             .Select(x => x.Artifact).FirstOrDefault(x => x is not null);
+        if (latestArtifact?.Type == "project-manager-setup.v1")
+            return HandleProjectSetupAsync(latestArtifact, context, cancellationToken);
         return latestArtifact is not null && string.Equals(
                 latestArtifact.Type, "creative-direction.game-vision-brief.v1", StringComparison.Ordinal)
             ? HandleGameVisionBriefAsync(request, latestArtifact, context, cancellationToken)

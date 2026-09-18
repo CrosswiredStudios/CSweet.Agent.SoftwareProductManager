@@ -1,6 +1,6 @@
 <Project>
   <PropertyGroup>
-    <CSweetAgentSdkRepositoryRoot Condition="'$(CSweetAgentSdkRepositoryRoot)' == ''">$(MSBuildThisFileDirectory)..\CSweetAgentSdk</CSweetAgentSdkRepositoryRoot>
+    <CSweetAgentSdkRepositoryRoot Condition="'$(CSweetAgentSdkRepositoryRoot)' == ''">$(MSBuildThisFileDirectory)..\CSweet.Agent.Sdk</CSweetAgentSdkRepositoryRoot>
     <UseLocalCSweetAgentSdk Condition="'$(UseLocalCSweetAgentSdk)' == '' and Exists('$(CSweetAgentSdkRepositoryRoot)\src\CSweet.Agent.SDK\CSweet.Agent.SDK.csproj')">true</UseLocalCSweetAgentSdk>
     <UseLocalCSweetAgentSdk Condition="'$(UseLocalCSweetAgentSdk)' == ''">false</UseLocalCSweetAgentSdk>
   </PropertyGroup>

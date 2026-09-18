@@ -14,7 +14,7 @@
   },
   "id": "com.csweet.product-manager",
   "name": "Maya Patel",
-  "version": "2.17.0",
+  "version": "2.18.0",
   "publisher": {
     "id": "com.csweet",
     "name": "C-Sweet"
@@ -1170,6 +1170,10 @@
     }
   ],
   "requires": [
+    {"name":"platform.workstream.plan.propose.v2","scope":"organization","purpose":"Submit project setup through the existing governed approval flow."},
+    {"name": "work.project-intake.assistance-list.v1", "scope": "organization", "purpose": "Recover pending setup requests assigned to this manager."},
+    {"name": "work.project-intake.manager-setup.v1", "scope": "organization", "purpose": "Read authorized project setup requests."},
+
     {
       "name": "work.calendar.read.v1",
       "scope": "organization",

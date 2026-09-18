@@ -263,7 +263,7 @@ public sealed class ProductManagerProfileTests
             "src",
             "CSweet.Agent.SoftwareProductManager",
             "CSweet.Agent.SoftwareProductManager.csproj"));
-        Assert.Contains("CSweet.Agent.SDK\" Version=\"3.40.0", project, StringComparison.Ordinal);
+        Assert.Contains("CSweet.Agent.SDK\" Version=\"3.51.0", project, StringComparison.Ordinal);
         Assert.Contains("<ProjectReference", project, StringComparison.Ordinal);
         Assert.Contains($"<Version>{ProductManagerProfile.Version}</Version>", project, StringComparison.Ordinal);
     }
@@ -446,6 +446,8 @@ public sealed class ProductManagerProfileTests
             0);
         AddPersonalTodoItemRequest? added = null;
         var runtime = new AgentTestRuntime()
+            .RegisterCapability<object, IReadOnlyList<ProjectIntakeSummary>>(ProjectIntakeCapabilities.AssistanceList,
+                (_, _) => Task.FromResult<IReadOnlyList<ProjectIntakeSummary>>([]))
             .RegisterCapability<ResourceChangeReadRequest, ResourceChangeReadResponse>(
                 PlatformCapabilities.ResourceChangeRead,
                 (_, _) => Task.FromResult(new ResourceChangeReadResponse([])))
@@ -850,6 +852,8 @@ What level of prototype fidelity are we aiming for?
         var sentMessages = new List<CommunicationSendCapture>();
 
         var runtime = new AgentTestRuntime()
+            .RegisterCapability<object, IReadOnlyList<ProjectIntakeSummary>>(ProjectIntakeCapabilities.AssistanceList,
+                (_, _) => Task.FromResult<IReadOnlyList<ProjectIntakeSummary>>([]))
             .RegisterCapability<ResourceChangeReadRequest, ResourceChangeReadResponse>(
                 PlatformCapabilities.ResourceChangeRead,
                 (_, _) => Task.FromResult(new ResourceChangeReadResponse([approved])))

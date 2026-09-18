@@ -1,6 +1,6 @@
 # C-Sweet Software Product Manager
 
-First-party Software Product Manager agent for C-Sweet, built on `CSweet.Agent.SDK` 3.40.0 and manifest protocol v2.
+First-party Software Product Manager agent for C-Sweet, built on `CSweet.Agent.SDK` 3.51.0 and manifest protocol v2.
 The agent package version is `2.15.0`.
 
 The configured-model lifecycle matrix is defined in
@@ -100,9 +100,9 @@ dotnet build CSweet.Agent.SoftwareProductManager.slnx
 dotnet test CSweet.Agent.SoftwareProductManager.slnx
 ```
 
-Requirements are .NET 10, `CSweet.Agent.SDK` 3.40.0, `CSweet.Memory`, an approved protocol-v2 installation, an active managing employee, and the grants in [GRANTS.md](GRANTS.md).
+Requirements are .NET 10, `CSweet.Agent.SDK` 3.51.0, `CSweet.Memory`, an approved protocol-v2 installation, an active managing employee, and the grants in [GRANTS.md](GRANTS.md).
 
-## SDK 3.40.0 authoring contract
+## SDK 3.51.0 authoring contract
 
 The protocol-v1 transport APIs were removed. The implementation now uses `AgentEventEnvelope`, `AgentCapabilityRequest`, `AgentWorkResult`, typed `AgentRuntimeContext.Platform` calls, `ReportProgressAsync`, live model tools, and `PlatformChatClient`. The v2 manifest adds schemas, timeouts, and idempotency and removes generic publications.
 
@@ -124,3 +124,7 @@ See [versioned release notes](releases/README.md). Add the matching note with ev
 ## Business calendar
 
 Requests business-scoped calendar read, create, update, cancel, and scheduling access. Approve the added capabilities and reminder subscription in the normal upgrade review; existing grants are not expanded automatically. Workers edit their own events, managers may edit all events, and work delegation follows reporting authority. Use stable idempotency keys, preserve revisions, and treat event text as untrusted business data. Typed operations are available through `context.Platform.Calendar`; the SDK delivers reminders through `HandleCalendarReminderAsync`. Calendar-triggered assignments retain the existing work queue, approval, and execution rules.
+
+## Project prerequisite
+
+Accepts typed project setup handoffs, waits for the existing staffing approval process, and submits project creation through the governed Workstream approval path. Recovers pending setup during attention review. Uses SDK 3.51.0.
