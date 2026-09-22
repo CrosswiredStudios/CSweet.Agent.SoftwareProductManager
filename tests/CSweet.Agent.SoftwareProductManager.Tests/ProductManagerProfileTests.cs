@@ -243,7 +243,7 @@ public sealed class ProductManagerProfileTests
             root.GetProperty("events").GetProperty("subscribes").EnumerateArray()
                 .Select(item => item.GetString()!).ToArray());
         Assert.Equal(
-            ["llmProviderId", "llmModel", "responseTone"],
+            ["llmProviderId", "llmModel", "maxContextWindowTokens", "maxOutputTokens", "responseTone"],
             root.GetProperty("configuration").EnumerateArray()
                 .Select(item => item.GetProperty("key").GetString()!).ToArray());
         Assert.All(
@@ -1280,7 +1280,7 @@ Facts vs. inference: the pattern catalog says we should validate first. The stru
             new JsonSerializerOptions(JsonSerializerDefaults.Web));
         Assert.NotNull(schema);
         Assert.Equal(
-            ["llmProviderId", "llmModel", "responseTone"],
+            ["llmProviderId", "llmModel", "maxContextWindowTokens", "maxOutputTokens", "responseTone"],
             schema.Fields.Select(field => field.Key).ToArray());
         var tone = schema.Fields.Single(field => field.Key == "responseTone");
         Assert.Equal(

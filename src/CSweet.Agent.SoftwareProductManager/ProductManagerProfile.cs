@@ -5,7 +5,7 @@ namespace CSweet.Agent.SoftwareProductManager;
 public static class ProductManagerProfile
 {
     public const string AgentId = "com.csweet.product-manager";
-    public const string Version = "2.18.0";
+    public const string Version = "2.18.1";
     public const string DefaultDisplayName = "Maya Patel";
     public const string AgentKey = "product-manager";
     public const string ConverseCapability = AssistantCapabilities.Converse;

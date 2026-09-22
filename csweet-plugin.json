@@ -14,7 +14,7 @@
   },
   "id": "com.csweet.product-manager",
   "name": "Maya Patel",
-  "version": "2.18.0",
+  "version": "2.18.1",
   "publisher": {
     "id": "com.csweet",
     "name": "C-Sweet"
@@ -1603,6 +1603,31 @@
       "required": true,
       "secret": false,
       "description": "Selects the chat model from the chosen provider profile."
+    },
+    {
+      "key": "maxContextWindowTokens",
+      "type": "number",
+      "label": "Maximum context-window tokens",
+      "required": true,
+      "secret": false,
+      "description": "Planning ceiling for Product Manager model requests; set this no higher than the selected model's real context window.",
+      "minimum": 32769,
+      "maximum": 2000000,
+      "step": 1000,
+      "defaultValue": 220000
+    },
+    {
+      "key": "maxOutputTokens",
+      "type": "number",
+      "label": "Maximum output tokens",
+      "required": true,
+      "secret": false,
+      "description": "Budget for each Product Manager model response, including reasoning. The provider may impose a lower ceiling.",
+      "minimum": 2048,
+      "maximum": 32768,
+      "step": 1000,
+      "defaultValue": 32000,
+      "lessThanFieldKey": "maxContextWindowTokens"
     },
     {
       "key": "responseTone",
