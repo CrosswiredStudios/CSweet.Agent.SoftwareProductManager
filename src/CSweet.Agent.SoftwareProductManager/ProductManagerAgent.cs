@@ -29,7 +29,6 @@ public sealed partial class ProductManagerAgent : CSweetAgentBase
     internal const int DefaultContextWindowTokens = 220_000;
     internal const int DefaultOutputTokens = 32_000;
     private const int MinimumOutputTokens = 2_048;
-    private const int MaximumOutputTokens = 32_768;
     private const string BoundedHiringSystemPrompt = """
         You are the Software Product Manager completing one bounded staffing action from authoritative
         manager direction. Design the smallest cross-functional product team that can deliver the
@@ -90,16 +89,14 @@ public sealed partial class ProductManagerAgent : CSweetAgentBase
                 required: true,
                 description: "Planning ceiling for Product Manager model requests; set this no higher than the selected model's real context window.",
                 minimum: 32_769,
-                maximum: 2_000_000,
                 step: 1_000,
                 defaultValue: DefaultContextWindowTokens)
             .Number(
                 "maxOutputTokens",
                 "Maximum output tokens",
                 required: true,
-                description: "Budget for each Product Manager model response, including reasoning. The provider may impose a lower ceiling.",
+                description: "Budget for each Product Manager model response, including reasoning. Set this within the selected model and provider's supported limits.",
                 minimum: MinimumOutputTokens,
-                maximum: MaximumOutputTokens,
                 step: 1_000,
                 defaultValue: DefaultOutputTokens,
                 lessThanFieldKey: "maxContextWindowTokens")
@@ -120,8 +117,8 @@ public sealed partial class ProductManagerAgent : CSweetAgentBase
     {
         var contextWindow = Math.Max(settings.GetInt32("maxContextWindowTokens", DefaultContextWindowTokens),
             MinimumOutputTokens + 1);
-        var output = Math.Clamp(settings.GetInt32("maxOutputTokens", DefaultOutputTokens),
-            MinimumOutputTokens, MaximumOutputTokens);
+        var output = Math.Max(settings.GetInt32("maxOutputTokens", DefaultOutputTokens),
+            MinimumOutputTokens);
         return Math.Min(output, contextWindow - 1);
     }
 

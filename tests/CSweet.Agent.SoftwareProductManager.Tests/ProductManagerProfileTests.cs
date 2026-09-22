@@ -1282,6 +1282,14 @@ Facts vs. inference: the pattern catalog says we should validate first. The stru
         Assert.Equal(
             ["llmProviderId", "llmModel", "maxContextWindowTokens", "maxOutputTokens", "responseTone"],
             schema.Fields.Select(field => field.Key).ToArray());
+        Assert.Null(schema.Fields.Single(field => field.Key == "maxContextWindowTokens").Maximum);
+        Assert.Null(schema.Fields.Single(field => field.Key == "maxOutputTokens").Maximum);
+        var tokenSettings = new AgentSettings(new Dictionary<string, JsonElement>
+        {
+            ["maxContextWindowTokens"] = JsonSerializer.SerializeToElement(220_000),
+            ["maxOutputTokens"] = JsonSerializer.SerializeToElement(128_000)
+        });
+        Assert.Equal(128_000, ProductManagerAgent.ResolveOutputTokens(tokenSettings));
         var tone = schema.Fields.Single(field => field.Key == "responseTone");
         Assert.Equal(
             ["concise", "balanced", "detailed"],
