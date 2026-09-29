@@ -217,7 +217,8 @@ public sealed class ProductManagerProfileTests
         var root = document.RootElement;
         Assert.Equal(AgentRolePolicyProfiles.Manager,
             root.GetProperty("rolePolicy").GetProperty("profile").GetString());
-        Assert.Equal(["software-product-manager", "product-manager"],
+        Assert.Equal("manager", root.GetProperty("rolePolicy").GetProperty("baseType").GetString());
+        Assert.Equal(["manager", "software-product-manager", "product-manager"],
             root.GetProperty("rolePolicy").GetProperty("declaredRoleKeys").EnumerateArray()
                 .Select(item => item.GetString()!).ToArray());
         Assert.All(root.GetProperty("provides").EnumerateArray(), capability =>
@@ -226,7 +227,7 @@ public sealed class ProductManagerProfileTests
             Assert.False(capability.GetProperty("outputSchema").GetProperty("additionalProperties").GetBoolean());
         });
         Assert.Equal(
-            ["com.csweet.calendar.reminder-due.v1", 
+            [ProjectHealthEvents.ReviewDue, ProjectHealthEvents.IncidentChanged, "com.csweet.calendar.reminder-due.v1",
                 PersonalTodoEvents.Available,
                 ArtifactEvents.AccessDecision,
                 CommunicationEvents.MessageMentioned,
@@ -263,7 +264,7 @@ public sealed class ProductManagerProfileTests
             "src",
             "CSweet.Agent.SoftwareProductManager",
             "CSweet.Agent.SoftwareProductManager.csproj"));
-        Assert.Contains("CSweet.Agent.SDK\" Version=\"3.51.0", project, StringComparison.Ordinal);
+        Assert.Contains("CSweet.Agent.SDK\" Version=\"3.58.0", project, StringComparison.Ordinal);
         Assert.Contains("<ProjectReference", project, StringComparison.Ordinal);
         Assert.Contains($"<Version>{ProductManagerProfile.Version}</Version>", project, StringComparison.Ordinal);
     }

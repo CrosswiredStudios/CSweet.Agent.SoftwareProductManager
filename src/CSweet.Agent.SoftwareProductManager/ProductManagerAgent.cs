@@ -14,8 +14,10 @@ using CSweet.WorkManagement.Contracts;
 
 namespace CSweet.Agent.SoftwareProductManager;
 
-public sealed partial class ProductManagerAgent : CSweetAgentBase
+public sealed partial class ProductManagerAgent : CSweetManagerAgentBase
 {
+    protected override string ManagementResponsibility => "software product management";
+
     private const string ArchitectRoleCategory = "software-architect";
     private const string DeveloperRoleCategory = "software-developer";
     private const string QualityRoleCategory = "software-qa";
@@ -191,7 +193,7 @@ or denied. Otherwise perform the task and return a concise completion summary.
             : PersonalTodoResult.Completed(response.Response);
     }
 
-    public override async Task HandleAttentionReviewAsync(
+    protected override async Task HandleManagerAttentionReviewAsync(
         AgentAttentionReviewContext review,
         AgentRuntimeContext context,
         CancellationToken cancellationToken)
@@ -2379,7 +2381,7 @@ Keep all tickets in Backlog and leave dates, estimates, repository details, and 
 
     private sealed record BacklogVerification(bool IsComplete, string Summary);
 
-    public override async Task HandleEventAsync(
+    protected override async Task HandleManagerEventAsync(
         AgentEventEnvelope message,
         AgentRuntimeContext context,
         CancellationToken cancellationToken)

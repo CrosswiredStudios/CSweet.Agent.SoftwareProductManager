@@ -2,8 +2,10 @@
   "manifestVersion": "2.0",
   "kind": "agent",
   "rolePolicy": {
+    "baseType": "manager",
     "profile": "manager.v1",
     "declaredRoleKeys": [
+      "manager",
       "software-product-manager",
       "product-manager"
     ],
@@ -14,7 +16,7 @@
   },
   "id": "com.csweet.product-manager",
   "name": "Maya Patel",
-  "version": "2.18.2",
+  "version": "2.19.0",
   "publisher": {
     "id": "com.csweet",
     "name": "C-Sweet"
@@ -1170,10 +1172,46 @@
     }
   ],
   "requires": [
-    {"name":"platform.workstream.plan.propose.v2","scope":"organization","purpose":"Submit project setup through the existing governed approval flow."},
-    {"name": "work.project-intake.assistance-list.v1", "scope": "organization", "purpose": "Recover pending setup requests assigned to this manager."},
-    {"name": "work.project-intake.manager-setup.v1", "scope": "organization", "purpose": "Read authorized project setup requests."},
-
+    {
+      "name": "platform.management.incident.read.v1",
+      "scope": "organization",
+      "purpose": "Inspect assigned project incidents and escalate through the authorized reporting hierarchy."
+    },
+    {
+      "name": "platform.management.incident.forward.v1",
+      "scope": "organization",
+      "purpose": "Inspect assigned project incidents and escalate through the authorized reporting hierarchy."
+    },
+    {
+      "name": "platform.project-health.read.v1",
+      "scope": "organization",
+      "purpose": "Inspect assigned project incidents and escalate through the authorized reporting hierarchy."
+    },
+    {
+      "name": "platform.project-health.diagnostics.read.v1",
+      "scope": "organization",
+      "purpose": "Inspect assigned project incidents and escalate through the authorized reporting hierarchy."
+    },
+    {
+      "name": "platform.management.incident.report.v1",
+      "scope": "organization",
+      "purpose": "Inspect assigned project incidents and escalate through the authorized reporting hierarchy."
+    },
+    {
+      "name": "platform.workstream.plan.propose.v2",
+      "scope": "organization",
+      "purpose": "Submit project setup through the existing governed approval flow."
+    },
+    {
+      "name": "work.project-intake.assistance-list.v1",
+      "scope": "organization",
+      "purpose": "Recover pending setup requests assigned to this manager."
+    },
+    {
+      "name": "work.project-intake.manager-setup.v1",
+      "scope": "organization",
+      "purpose": "Read authorized project setup requests."
+    },
     {
       "name": "work.calendar.read.v1",
       "scope": "organization",
@@ -1572,6 +1610,8 @@
   ],
   "events": {
     "subscribes": [
+      "com.csweet.project-health.review-due.v1",
+      "com.csweet.management.incident.changed.v1",
       "com.csweet.calendar.reminder-due.v1",
       "com.csweet.work.personal-todo.available.v1",
       "com.csweet.artifact.access-decision.v1",
