@@ -1,6 +1,6 @@
 # C-Sweet Software Product Manager
 
-First-party Software Product Manager agent for C-Sweet, built on `CSweet.Agent.SDK` 3.58.0 and manifest protocol v2.
+First-party Software Product Manager agent for C-Sweet, built on `CSweet.Agent.SDK` 3.59.0 and manifest protocol v2.
 The agent package version is `2.15.0`.
 
 The configured-model lifecycle matrix is defined in
@@ -100,9 +100,9 @@ dotnet build CSweet.Agent.SoftwareProductManager.slnx
 dotnet test CSweet.Agent.SoftwareProductManager.slnx
 ```
 
-Requirements are .NET 10, `CSweet.Agent.SDK` 3.58.0, `CSweet.Memory`, an approved protocol-v2 installation, an active managing employee, and the grants in [GRANTS.md](GRANTS.md).
+Requirements are .NET 10, `CSweet.Agent.SDK` 3.59.0, `CSweet.Memory`, an approved protocol-v2 installation, an active managing employee, and the grants in [GRANTS.md](GRANTS.md).
 
-## SDK 3.58.0 authoring contract
+## SDK 3.59.0 authoring contract
 
 The protocol-v1 transport APIs were removed. The implementation now uses `AgentEventEnvelope`, `AgentCapabilityRequest`, `AgentWorkResult`, typed `AgentRuntimeContext.Platform` calls, `ReportProgressAsync`, live model tools, and `PlatformChatClient`. The v2 manifest adds schemas, timeouts, and idempotency and removes generic publications.
 
@@ -127,7 +127,7 @@ Requests business-scoped calendar read, create, update, cancel, and scheduling a
 
 ## Project prerequisite
 
-Accepts typed project setup handoffs, waits for the existing staffing approval process, and submits project creation through the governed Workstream approval path. Recovers pending setup during attention review. Uses SDK 3.58.0.
+Accepts typed project setup handoffs, waits for the existing staffing approval process, and submits project creation through the governed Workstream approval path. Recovers pending setup during attention review. Uses SDK 3.59.0.
 
 
 ## Shared manager type
@@ -139,3 +139,7 @@ Diagnostic reads and assessment reports require the manifest's current approved 
 incident grants. Monitoring covers current assigned projects only. The default diagnosis escalates;
 role-specific recovery can be added through `AssessIncidentAsync` using existing authorized operations.
 A recorded recovery request does not close the incident or extend its 15-minute escalation deadline.
+
+## Hierarchical delivery
+
+The V2 assignment identifies Task, Story, Epic or Release scope. Tasks require an authorized sprint; aggregate reviews require an active delivery plan and do not invent sprint identities. Use the exact assigned branch, commit or artifact revision. Every task requires independent QA, including documents. Managers accept aggregate candidates using current evidence; task completion does not promote to main or authorize deployment.

@@ -227,7 +227,7 @@ public sealed class ProductManagerProfileTests
             Assert.False(capability.GetProperty("outputSchema").GetProperty("additionalProperties").GetBoolean());
         });
         Assert.Equal(
-            [ProjectHealthEvents.ReviewDue, ProjectHealthEvents.IncidentChanged, "com.csweet.calendar.reminder-due.v1",
+            [WorkDeliveryCapabilities.Changed, ProjectHealthEvents.ReviewDue, ProjectHealthEvents.IncidentChanged, "com.csweet.calendar.reminder-due.v1",
                 PersonalTodoEvents.Available,
                 ArtifactEvents.AccessDecision,
                 CommunicationEvents.MessageMentioned,
@@ -264,7 +264,7 @@ public sealed class ProductManagerProfileTests
             "src",
             "CSweet.Agent.SoftwareProductManager",
             "CSweet.Agent.SoftwareProductManager.csproj"));
-        Assert.Contains("CSweet.Agent.SDK\" Version=\"3.58.0", project, StringComparison.Ordinal);
+        Assert.Contains("CSweet.Agent.SDK\" Version=\"3.59.0", project, StringComparison.Ordinal);
         Assert.Contains("<ProjectReference", project, StringComparison.Ordinal);
         Assert.Contains($"<Version>{ProductManagerProfile.Version}</Version>", project, StringComparison.Ordinal);
     }
@@ -812,9 +812,9 @@ What level of prototype fidelity are we aiming for?
             new WorkBoardColumn(Guid.NewGuid(), "Backlog", "ToDo", 0, "Disabled", null),
             new WorkBoardColumn(Guid.NewGuid(), "Ready For Development", "ToDo", 1, "Disabled", null),
             new WorkBoardColumn(Guid.NewGuid(), "In Development", "InProgress", 2, "Disabled", null),
-            new WorkBoardColumn(Guid.NewGuid(), "Dev Complete", "InProgress", 3, "Disabled", null),
+            new WorkBoardColumn(Guid.NewGuid(), "Technical Review", "InProgress", 3, "Disabled", null),
             new WorkBoardColumn(Guid.NewGuid(), "In Testing", "InProgress", 4, "Disabled", null),
-            new WorkBoardColumn(Guid.NewGuid(), "Ready To Merge", "InProgress", 5, "Disabled", null),
+            new WorkBoardColumn(Guid.NewGuid(), "Manager Review", "InProgress", 5, "Disabled", null),
             new WorkBoardColumn(Guid.NewGuid(), "Done", "Done", 6, "Disabled", null)
         };
         var board = new WorkBoardSummary(boardId, "Web Games", "Approved", false, false, 1, [])
@@ -1874,7 +1874,7 @@ Revert the isolated state module.
         var repaired = ProductManagerAgent.BuildReconciledSoftwareBoardColumns(detail);
 
         Assert.Equal(
-            ["Backlog", "Ready For Development", "In Development", "Dev Complete", "In Testing", "Ready To Merge", "Done"],
+            ["Backlog", "Ready For Development", "In Development", "Technical Review", "In Testing", "Manager Review", "Done"],
             repaired.Select(x => x.Name));
         Assert.Equal(toDoId, repaired[0].Id);
         Assert.Equal(doneId, repaired[^1].Id);
@@ -2252,9 +2252,9 @@ Revert the isolated state module.
             new WorkBoardColumn(Guid.NewGuid(), "Backlog", "ToDo", 0, "Disabled", null),
             new WorkBoardColumn(Guid.NewGuid(), "Ready For Development", "ToDo", 1, "Disabled", null),
             new WorkBoardColumn(Guid.NewGuid(), "In Development", "InProgress", 2, "Disabled", null),
-            new WorkBoardColumn(Guid.NewGuid(), "Dev Complete", "InProgress", 3, "Disabled", null),
+            new WorkBoardColumn(Guid.NewGuid(), "Technical Review", "InProgress", 3, "Disabled", null),
             new WorkBoardColumn(Guid.NewGuid(), "In Testing", "InProgress", 4, "Disabled", null),
-            new WorkBoardColumn(Guid.NewGuid(), "Ready To Merge", "InProgress", 5, "Disabled", null),
+            new WorkBoardColumn(Guid.NewGuid(), "Manager Review", "InProgress", 5, "Disabled", null),
             new WorkBoardColumn(Guid.NewGuid(), "Done", "Done", 6, "Disabled", null)
         };
         var board = new WorkBoardSummary(boardId, "Release Product Team", "Approved", false, false, 1, [])

@@ -1213,6 +1213,14 @@ Keep all tickets in Backlog and leave dates, estimates, repository details, and 
             .OrderBy(x => x.CanonicalPath, StringComparer.Ordinal)
             .ThenBy(x => x.RepositoryId)
             .FirstOrDefault();
+        if (board.Board.WorkstreamId is { } projectId && board.Columns.Any(x => x.Name == "Technical Review"))
+        {
+            var project = await context.Platform.ReadWorkstreamAsync(new(projectId), cancellationToken);
+            await HierarchicalProjectDelivery.PrepareAsync(projectId, boardId, self.Id, roster.Team,
+                repository?.RepositoryId ?? Guid.Empty, repository?.DefaultBranch ?? "", project.ProfileDefinitionDigest ?? "software-delivery-v2",
+                true, context, cancellationToken);
+            return null;
+        }
         if (repository is null)
             return "Waiting for an authorized team repository and base branch.";
 
@@ -1439,7 +1447,7 @@ Keep all tickets in Backlog and leave dates, estimates, repository details, and 
                         null,
                         null,
                         $"incremental-plan:{planKey}:epic:{NormalizeArtifactKey(epic.Key)}")
-                    { TypeKey = WorkItemTypeKeys.SoftwareEpicV1 },
+                    { TypeKey = WorkItemTypeKeys.SoftwareEpicV2 },
                     cancellationToken);
                 existing[epic.Key] = item;
             }
@@ -1526,7 +1534,7 @@ Keep all tickets in Backlog and leave dates, estimates, repository details, and 
                         null,
                         $"incremental-plan:{planKey}:story:{NormalizeArtifactKey(story.Key)}")
                     {
-                        TypeKey = WorkItemTypeKeys.SoftwareStoryV1,
+                        TypeKey = WorkItemTypeKeys.SoftwareStoryV2,
                         Planning = planning,
                         ProposalProvenance = new WorkItemProposalProvenance(
                             coordinationSessionId,
@@ -2386,6 +2394,12 @@ Keep all tickets in Backlog and leave dates, estimates, repository details, and 
         AgentRuntimeContext context,
         CancellationToken cancellationToken)
     {
+        if (message.EventType == WorkDeliveryCapabilities.Changed)
+        {
+            await HandleAttentionReviewAsync(new AgentAttentionReviewContext(message.EventId, message.OccurredAt,
+                message.OccurredAt.AddMinutes(5), message.EventType), context, cancellationToken);
+            return;
+        }
         if (string.Equals(message.EventType, ProductManagerProfile.OnboardedEvent, StringComparison.Ordinal))
         {
             await HandleOnboardedAsync(message, context, cancellationToken);
@@ -3523,9 +3537,9 @@ Retry now. The ensure_software_team_board tool is required. Use its structured r
         new(null, "Backlog", "ToDo", "Disabled"),
         new(null, "Ready For Development", "ToDo", "Disabled"),
         new(null, "In Development", "InProgress", "Disabled"),
-        new(null, "Dev Complete", "InProgress", "Disabled"),
+        new(null, "Technical Review", "InProgress", "Disabled"),
         new(null, "In Testing", "InProgress", "Disabled"),
-        new(null, "Ready To Merge", "InProgress", "Disabled"),
+        new(null, "Manager Review", "InProgress", "Disabled"),
         new(null, "Done", "Done", "Disabled")
     ];
 
@@ -3583,7 +3597,7 @@ Retry now. The ensure_software_team_board tool is required. Use its structured r
             {
                 TeamId = teamId,
                 Key = expectedKey,
-                ProfileKey = WorkBoardProfileKeys.SoftwareDeliveryV1
+                ProfileKey = WorkBoardProfileKeys.SoftwareDeliveryV2
             },
             cancellationToken);
 
@@ -3623,13 +3637,13 @@ Retry now. The ensure_software_team_board tool is required. Use its structured r
                 board.Id,
                 Column("Ready For Development"),
                 Column("In Development"),
-                Column("Dev Complete"),
+                Column("Technical Review"),
                 Column("In Testing"),
-                Column("Ready To Merge"),
+                Column("Manager Review"),
                 Column("Done"),
                 WorkMergeModes.ManagerApproval,
                 3,
-                $"product-team-board:{request.RequesterOrganizationUserId:N}:software-template:v3"),
+                $"product-team-board:{request.RequesterOrganizationUserId:N}:software-template:v4"),
             cancellationToken);
 
         var verified = await context.Platform.Work.ReadBoardAsync(board.Id, cancellationToken);
