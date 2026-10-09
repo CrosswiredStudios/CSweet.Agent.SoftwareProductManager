@@ -16,7 +16,7 @@
   },
   "id": "com.csweet.product-manager",
   "name": "Maya Patel",
-  "version": "2.20.2",
+  "version": "2.20.3",
   "publisher": {
     "id": "com.csweet",
     "name": "C-Sweet"
@@ -1916,7 +1916,7 @@
       "description": "Planning ceiling for Product Manager model requests; set this no higher than the selected model's real context window.",
       "minimum": 32769,
       "step": 1000,
-      "defaultValue": 220000
+      "defaultValue": 256000
     },
     {
       "key": "maxOutputTokens",
@@ -1927,7 +1927,7 @@
       "description": "Budget for each Product Manager model response, including reasoning. Set this within the selected model and provider's supported limits.",
       "minimum": 2048,
       "step": 1000,
-      "defaultValue": 32000,
+      "defaultValue": 128000,
       "lessThanFieldKey": "maxContextWindowTokens"
     },
     {

@@ -28,8 +28,8 @@ public sealed partial class ProductManagerAgent : CSweetManagerAgentBase
     private const string StaffingCommitmentPrefix = "product-team-staffing:";
     private const string PlanningCommitmentPrefix = "product-architect-planning:";
     private const string SprintReadinessCommitmentPrefix = "product-sprint-readiness:";
-    internal const int DefaultContextWindowTokens = 220_000;
-    internal const int DefaultOutputTokens = 32_000;
+    internal const int DefaultContextWindowTokens = 256_000;
+    internal const int DefaultOutputTokens = 128_000;
     private const int MinimumOutputTokens = 2_048;
     private const string BoundedHiringSystemPrompt = """
         You are the Software Product Manager completing one bounded staffing action from authoritative
