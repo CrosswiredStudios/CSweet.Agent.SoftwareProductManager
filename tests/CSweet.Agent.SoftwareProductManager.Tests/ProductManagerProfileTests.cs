@@ -239,7 +239,7 @@ public sealed class ProductManagerProfileTests
                 ManagementEvents.ResourceChangeDecided,
                 StaffingReplenishmentEvents.Decided,
                 WorkforceEvents.Changed,
-                ProductManagerProfile.RecommendationFulfilledEvent
+                ProductManagerProfile.RecommendationFulfilledEvent, DelegationCapabilities.Received, DelegationCapabilities.Changed
             ],
             root.GetProperty("events").GetProperty("subscribes").EnumerateArray()
                 .Select(item => item.GetString()!).ToArray());
@@ -264,7 +264,7 @@ public sealed class ProductManagerProfileTests
             "src",
             "CSweet.Agent.SoftwareProductManager",
             "CSweet.Agent.SoftwareProductManager.csproj"));
-        Assert.Contains("CSweet.Agent.SDK\" Version=\"3.59.0", project, StringComparison.Ordinal);
+        Assert.Contains("CSweet.Agent.SDK\" Version=\"3.65.0", project, StringComparison.Ordinal);
         Assert.Contains("<ProjectReference", project, StringComparison.Ordinal);
         Assert.Contains($"<Version>{ProductManagerProfile.Version}</Version>", project, StringComparison.Ordinal);
     }

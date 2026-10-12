@@ -16,7 +16,7 @@
   },
   "id": "com.csweet.product-manager",
   "name": "Maya Patel",
-  "version": "2.20.3",
+  "version": "2.21.0",
   "publisher": {
     "id": "com.csweet",
     "name": "C-Sweet"
@@ -1868,6 +1868,72 @@
       "scope": "team",
       "purpose": "Publish one PM-approved page of junior-ready Tasks beneath one Story through deterministic coordination",
       "modelVisible": false
+    },
+    {
+      "name": "work.delegation.create.v1",
+      "scope": "organization",
+      "purpose": "Use shared SDK delegation, authenticated recipient resolution, canonical work and durable reporting within existing resource authority.",
+      "modelVisible": false
+    },
+    {
+      "name": "work.delegation.read.v1",
+      "scope": "organization",
+      "purpose": "Use shared SDK delegation, authenticated recipient resolution, canonical work and durable reporting within existing resource authority.",
+      "modelVisible": false
+    },
+    {
+      "name": "work.delegation.respond.v1",
+      "scope": "organization",
+      "purpose": "Use shared SDK delegation, authenticated recipient resolution, canonical work and durable reporting within existing resource authority.",
+      "modelVisible": false
+    },
+    {
+      "name": "work.delegation.publish.v1",
+      "scope": "organization",
+      "purpose": "Use shared SDK delegation, authenticated recipient resolution, canonical work and durable reporting within existing resource authority.",
+      "modelVisible": false
+    },
+    {
+      "name": "work.delegation.cancel.v1",
+      "scope": "organization",
+      "purpose": "Use shared SDK delegation, authenticated recipient resolution, canonical work and durable reporting within existing resource authority.",
+      "modelVisible": false
+    },
+    {
+      "name": "work.tracking.follow.v1",
+      "scope": "organization",
+      "purpose": "Use shared SDK delegation, authenticated recipient resolution, canonical work and durable reporting within existing resource authority.",
+      "modelVisible": false
+    },
+    {
+      "name": "work.tracking.unfollow.v1",
+      "scope": "organization",
+      "purpose": "Use shared SDK delegation, authenticated recipient resolution, canonical work and durable reporting within existing resource authority.",
+      "modelVisible": false
+    },
+    {
+      "name": "work.tracking.read.v1",
+      "scope": "organization",
+      "purpose": "Use shared SDK delegation, authenticated recipient resolution, canonical work and durable reporting within existing resource authority.",
+      "modelVisible": false
+    },
+    {
+      "name": "work.tracking.progress.v1",
+      "scope": "organization",
+      "purpose": "Use shared SDK delegation, authenticated recipient resolution, canonical work and durable reporting within existing resource authority.",
+      "modelVisible": false
+    },
+    {
+      "name": "work.tracking.pending.v1",
+      "scope": "organization",
+      "purpose": "Use shared SDK delegation, authenticated recipient resolution, canonical work and durable reporting within existing resource authority.",
+      "modelVisible": false
+    },
+    {
+      "name": "work.tracking.processed.v1",
+      "scope": "organization",
+      "purpose": "Use shared SDK delegation, authenticated recipient resolution, canonical work and durable reporting within existing resource authority.",
+      "modelVisible": false
     }
   ],
   "events": {
@@ -1887,7 +1953,9 @@
       "com.csweet.management.resource-change.decided.v1",
       "com.csweet.management.staffing-replenishment.decided.v1",
       "com.csweet.workforce.changed.v1",
-      "com.csweet.hiring-recommendation.fulfilled.v1"
+      "com.csweet.hiring-recommendation.fulfilled.v1",
+      "com.csweet.work.delegation.received.v1",
+      "com.csweet.work.tracking.changed.v1"
     ]
   },
   "configuration": [
