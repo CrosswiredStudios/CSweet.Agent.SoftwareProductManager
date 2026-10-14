@@ -16,7 +16,7 @@
   },
   "id": "com.csweet.product-manager",
   "name": "Maya Patel",
-  "version": "2.21.0",
+  "version": "3.0.0",
   "publisher": {
     "id": "com.csweet",
     "name": "C-Sweet"
@@ -43,7 +43,7 @@
   },
   "provides": [
     {
-      "name": "work.execution.run.v2",
+      "name": "work.execution.run",
       "description": "Execute the authoritative task or delivery-plan scope with exact revision evidence and independent QA.",
       "inputSchema": {
         "type": "object",
