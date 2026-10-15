@@ -1,7 +1,7 @@
 # C-Sweet Software Product Manager
 
 First-party Software Product Manager agent for C-Sweet, built on `CSweet.Agent.SDK` 4.1.1 and manifest protocol v2.
-The agent package version is `2.15.0`.
+The agent package version is `3.1.2`.
 
 The configured-model lifecycle matrix is defined in
 [`evals/product-manager-lifecycle.v1.json`](evals/product-manager-lifecycle.v1.json) and must run
@@ -157,3 +157,5 @@ Execution uses one `work.execution.run` capability and `WorkExecutionAssignment`
 ## Shared manager blocker reporting
 
 This release uses SDK 4.1.1 `ManagerIncidentCoordinator` for evidence-based incident reports and human-selected fixes. The shared SDK dispatcher runs before this agent's specialist intake, coordinates authorized recovery or delegation, and preserves required approvals. The incident presentation/update and resolution/read grants plus `com.csweet.management.incident.owner-report-requested.v1` allow existing open incidents to receive refreshed reports. Apply the platform migration before upgrading.
+
+Activation defaults to OnDemand. Durable messages, assignments, scheduled duties and attention reviews wake the agent; idle runtimes release their Office slot. Attention wakes require the platform scheduler that supports sleeping OnDemand installations. Existing installations retain their selected activation mode until their schedule is updated.

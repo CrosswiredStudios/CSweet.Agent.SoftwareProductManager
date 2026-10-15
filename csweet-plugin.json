@@ -16,7 +16,7 @@
   },
   "id": "com.csweet.product-manager",
   "name": "Maya Patel",
-  "version": "3.1.1",
+  "version": "3.1.2",
   "publisher": {
     "id": "com.csweet",
     "name": "C-Sweet"
@@ -32,7 +32,7 @@
     "type": "dotnet-project",
     "projectPath": "src/CSweet.Agent.SoftwareProductManager/CSweet.Agent.SoftwareProductManager.csproj",
     "targetFramework": "net10.0",
-    "defaultActivationMode": "AlwaysOn",
+    "defaultActivationMode": "OnDemand",
     "defaultTickFrequencySeconds": 300,
     "supportsMultipleInstallations": true,
     "maximumConcurrentJobs": 1

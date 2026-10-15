@@ -206,6 +206,7 @@ public sealed class ProductManagerProfileTests
     {
         var manifestPath = ManifestPath();
         var manifest = await AgentManifestLoader.LoadAsync(manifestPath, CancellationToken.None);
+        Assert.Equal("OnDemand", manifest.Runtime.DefaultActivationMode);
 
         Assert.Equal(ProductManagerProfile.AgentId, manifest.Id);
         Assert.Equal(ProductManagerProfile.Version, manifest.Version);
