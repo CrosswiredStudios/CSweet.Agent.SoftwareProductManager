@@ -1,7 +1,7 @@
 # C-Sweet Software Product Manager
 
-First-party Software Product Manager agent for C-Sweet, built on `CSweet.Agent.SDK` 4.1.1 and manifest protocol v2.
-The agent package version is `3.1.2`.
+First-party Software Product Manager agent for C-Sweet, built on `CSweet.Agent.SDK` 5.0.2 and manifest protocol v2.
+The agent package version is `4.0.0`.
 
 The configured-model lifecycle matrix is defined in
 [`evals/product-manager-lifecycle.v1.json`](evals/product-manager-lifecycle.v1.json) and must run
@@ -100,9 +100,9 @@ dotnet build CSweet.Agent.SoftwareProductManager.slnx
 dotnet test CSweet.Agent.SoftwareProductManager.slnx
 ```
 
-Requirements are .NET 10, `CSweet.Agent.SDK` 4.1.1, `CSweet.Memory`, an approved protocol-v2 installation, an active managing employee, and the grants in [GRANTS.md](GRANTS.md).
+Requirements are .NET 10, `CSweet.Agent.SDK` 5.0.2, `CSweet.Memory`, an approved protocol-v2 installation, an active managing employee, and the grants in [GRANTS.md](GRANTS.md).
 
-## SDK 4.1.1 authoring contract
+## SDK 5.0.2 authoring contract
 
 The protocol-v1 transport APIs were removed. The implementation now uses `AgentEventEnvelope`, `AgentCapabilityRequest`, `AgentWorkResult`, typed `AgentRuntimeContext.Platform` calls, `ReportProgressAsync`, live model tools, and `PlatformChatClient`. The v2 manifest adds schemas, timeouts, and idempotency and removes generic publications.
 
@@ -127,7 +127,7 @@ Requests business-scoped calendar read, create, update, cancel, and scheduling a
 
 ## Project prerequisite
 
-Accepts typed project setup handoffs, waits for the existing staffing approval process, and submits project creation through the governed Workstream approval path. Recovers pending setup during attention review. Uses SDK 4.1.1.
+Accepts typed project setup handoffs, waits for the existing staffing approval process, and submits project creation through the governed Workstream approval path. Recovers pending setup during attention review. Uses SDK 5.0.2.
 
 
 ## Shared manager type
@@ -148,7 +148,7 @@ Model token settings default to 256,000 context-window tokens (maxContextWindowT
 
 ## Delegation and tracking
 
-SDK 4.1.1 dispatches authenticated delegation before specialist conversation fallback. The manifest requests delegation, work tracking, directory and conversation reads, personal commitments and model interpretation. These declarations require reviewed grants; existing resource permissions and approval rules still apply. The shared SDK owns coordinator reporting and wake recovery.
+SDK 5.0.2 dispatches authenticated delegation before specialist conversation fallback. The manifest requests delegation, work tracking, directory and conversation reads, personal commitments and model interpretation. These declarations require reviewed grants; existing resource permissions and approval rules still apply. The shared SDK owns coordinator reporting and wake recovery.
 
 ## Execution contract (3.0.0)
 
@@ -156,6 +156,6 @@ Execution uses one `work.execution.run` capability and `WorkExecutionAssignment`
 
 ## Shared manager blocker reporting
 
-This release uses SDK 4.1.1 `ManagerIncidentCoordinator` for evidence-based incident reports and human-selected fixes. The shared SDK dispatcher runs before this agent's specialist intake, coordinates authorized recovery or delegation, and preserves required approvals. The incident presentation/update and resolution/read grants plus `com.csweet.management.incident.owner-report-requested.v1` allow existing open incidents to receive refreshed reports. Apply the platform migration before upgrading.
+This release uses SDK 5.0.2 `ManagerIncidentCoordinator` for evidence-based incident reports and human-selected fixes. The shared SDK dispatcher runs before this agent's specialist intake, coordinates authorized recovery or delegation, and preserves required approvals. The incident presentation/update and resolution/read grants plus `com.csweet.management.incident.owner-report-requested.v1` allow existing open incidents to receive refreshed reports. Apply the platform migration before upgrading.
 
 Activation defaults to OnDemand. Durable messages, assignments, scheduled duties and attention reviews wake the agent; idle runtimes release their Office slot. Attention wakes require the platform scheduler that supports sleeping OnDemand installations. Existing installations retain their selected activation mode until their schedule is updated.
