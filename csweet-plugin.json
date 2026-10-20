@@ -16,7 +16,7 @@
   },
   "id": "com.csweet.product-manager",
   "name": "Maya Patel",
-  "version": "4.0.0",
+  "version": "4.1.0",
   "publisher": {
     "id": "com.csweet",
     "name": "C-Sweet"
@@ -1946,6 +1946,12 @@
       "scope": "organization",
       "purpose": "Read the authenticated human recovery choice bound to this manager and its durable conversation turn.",
       "modelVisible": false
+    },
+    {
+      "name": "work.item.comments.read",
+      "scope": "team",
+      "purpose": "Read current directed ticket discussions and reconcile missed events within approved board access.",
+      "modelVisible": false
     }
   ],
   "events": {
@@ -1968,7 +1974,8 @@
       "com.csweet.hiring-recommendation.fulfilled.v1",
       "com.csweet.work.delegation.received.v1",
       "com.csweet.work.tracking.changed.v1",
-      "com.csweet.management.incident.owner-report-requested.v1"
+      "com.csweet.management.incident.owner-report-requested.v1",
+      "com.csweet.work.item.discussion.changed.v1"
     ]
   },
   "configuration": [

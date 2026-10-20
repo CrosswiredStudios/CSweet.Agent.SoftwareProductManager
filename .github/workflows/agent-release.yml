@@ -60,9 +60,11 @@ jobs:
           $projectVersion = [string]($project.Project.PropertyGroup | Where-Object Version | Select-Object -First 1).Version
           if ($projectVersion -ne $version) { throw "csproj version $projectVersion does not match manifest version $version." }
           if (-not (Test-Path "releases/$version.md")) { throw "Missing releases/$version.md for version $version." }
-      - run: dotnet test CSweet.Agent.SoftwareProductManager.slnx -c Release
+      - run: dotnet test CSweet.Agent.SoftwareProductManager.slnx -c Release -p:UseLocalCSweetAgentSdk=false -p:UseLocalCSweetWorkManagementContracts=false
       - name: Publish linux-x64 agent
-        run: dotnet publish src/CSweet.Agent.SoftwareProductManager/CSweet.Agent.SoftwareProductManager.csproj -c Release --framework net10.0 --runtime linux-x64 --self-contained false -o publish/linux-x64
+        run: dotnet publish src/CSweet.Agent.SoftwareProductManager/CSweet.Agent.SoftwareProductManager.csproj -c Release --framework net10.0 --runtime linux-x64 --self-contained false -p:UseLocalCSweetAgentSdk=false -p:UseLocalCSweetWorkManagementContracts=false -o publish/linux-x64
+      - name: Verify published entrypoint
+        run: dotnet publish/linux-x64/CSweet.Agent.SoftwareProductManager.dll --self-test
       - name: Stage manifest and pack bundle
         shell: pwsh
         run: |

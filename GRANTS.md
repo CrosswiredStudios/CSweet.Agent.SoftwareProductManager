@@ -2,10 +2,10 @@
 
 This document is the human-readable grant catalog for the C-Sweet Software Product Manager agent. The source
 of truth for installation authorization remains [`csweet-plugin.json`](csweet-plugin.json). This
-catalog was last verified against package version `2.18.1` and manifest protocol `2.0`.
+catalog was last verified against package version `4.1.0` and manifest protocol `2.0`.
 
 Serialized capability names are sourced from the authoritative `CapabilityCatalog` in
-`CSweet.Agent.SDK` 3.47.0; manifest-audit tests reject names missing from that catalog.
+`CSweet.Agent.SDK` 5.0.2; manifest-audit tests reject names missing from that catalog.
 
 ## How to read this catalog
 
@@ -76,6 +76,7 @@ policy at runtime.
 | `work.item.read` | team | Read published tickets before revision-safe readiness moves. |
 | `work.item.create` | team | Create idempotent decision-ready planning tickets on the approved board. |
 | `work.item.comment` | team | Disseminate authoritative decisions to affected planning tickets. |
+| `work.item.comments.read` | team | Read current directed discussions and bounded missed-event reconciliation; it grants no response, execution or approval authority by itself. |
 | `work.item.comment.update.v1` | team | Correct this agent's own product-context comment on a planning ticket. |
 | `work.item.comment.delete.v1` | team | Retract this agent's own product-context comment while its activity history is retained. |
 | `work.item.move` | team | Move first-sprint Stories and Tasks to Ready For Development. |
@@ -85,6 +86,20 @@ policy at runtime.
 | `work.orchestration.start` | team | Explicitly activate one eligible sprint as board manager. |
 | `source-control.repository.team-options.v2` | team | List only code projects enabled by the current team's delivery policy. |
 | `source-control.repository.provision.v2` | organization | Request one policy-bounded private Managed GitHub project without receiving provider credentials. |
+
+`prepare_sprint_delivery` is an adapter-bound model tool over the already declared
+`work.delivery.read.v1`, `work.delivery.configure.v1`, `work.delivery.control.v1`,
+`work.item.create` and `work.item.delivery.finalize` operations. It checks the current project and
+board manager, selected Planned sprint, accepted task planning, exact retained assignments and
+unambiguous approved repository. The platform repeats grant, participation, review-independence
+and revision checks. The tool creates no grants, starts no sprint, approves no review, and performs
+no default-branch promotion or deployment. `read_project_delivery` reads only a currently managed
+board's project. `read_ticket_discussion` repeats current board ownership checks and reads bounded
+20-comment pages (at most 50 pages). The underlying delivery controls remain hidden from generic model tools.
+
+`com.csweet.work.item.discussion.changed.v1` is a wake hint. The handler re-reads the ticket and
+current question revision and posts only a correlated product-scope reply after retaining its
+answer in private operating state. Attention recovery is bounded to five current project tickets.
 
 The Product Manager's manager is the CEO resolved from the authoritative organization snapshot.
 A finalized team created outside that reporting conversation is routed into the protected CEO
