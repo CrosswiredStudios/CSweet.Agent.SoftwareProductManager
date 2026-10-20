@@ -1,7 +1,7 @@
 # C-Sweet Software Product Manager
 
 First-party Software Product Manager agent for C-Sweet, built on `CSweet.Agent.SDK` 5.0.2 and manifest protocol v2.
-The agent package version is `4.0.0`.
+The agent package version is `4.1.0`.
 
 The configured-model lifecycle matrix is defined in
 [`evals/product-manager-lifecycle.v1.json`](evals/product-manager-lifecycle.v1.json) and must run
@@ -10,6 +10,10 @@ against every supported configured model profile before release.
 It owns product outcomes, customer discovery, product strategy, prioritization, roadmaps, requirements, success measures, delivery alignment, and product-team design. It does not choose technical architecture, write production code, make legal conclusions, source candidates, hire workers, or spend money.
 
 ## Runtime behavior
+
+Version 4.1.0 adds bounded existing-sprint delivery preparation and directed ticket discussion,
+adapted from Gabriel's Producer delivery patterns. See [manager delivery readiness](docs/manager-delivery.md)
+for authority, recovery behavior, verification and the remaining live acceptance.
 
 The agent receives exact-installation durable events and capability work. Its primary startup goal is
 to understand the authoritative product context and then recommend the smallest appropriate
@@ -88,6 +92,11 @@ hours; runtime failures resume through public coordination recovery capabilities
 Architect readiness immediately requeues an existing waiting planning commitment, while attention
 reviews provide the same recovery path after missed or replayed communication events.
 
+An employee already assigned as manager of an existing project reconciles its current delivery
+plans without replacing its team or creating a new board. The selected sprint must already have
+accepted planning and exact author/reviewer assignments before `prepare_sprint_delivery` can
+prepare its isolated code branch. Preparation does not start the sprint or approve source.
+
 When an executive finalizes a product-team recommendation outside the Software Product Manager's reporting
 conversation, the runtime resolves the CEO manager and routes the atomic resource-change request
 into the protected CEO chat. The human CEO retains the requirement that approval originate from
@@ -152,7 +161,7 @@ SDK 5.0.2 dispatches authenticated delegation before specialist conversation fal
 
 ## Execution contract (3.0.0)
 
-Execution uses one `work.execution.run` capability and `WorkExecutionAssignment` from SDK/WorkManagement.Contracts 4.0.0. Task and aggregate scopes retain their distinct authority checks within that envelope. Upgrade the platform and executing agents together; no legacy execution adapter remains.
+Execution uses one `work.execution.run` capability and `WorkExecutionAssignment` from SDK/WorkManagement.Contracts 4.1.0. Task and aggregate scopes retain their distinct authority checks within that envelope. Upgrade the platform and executing agents together; no legacy execution adapter remains.
 
 ## Shared manager blocker reporting
 

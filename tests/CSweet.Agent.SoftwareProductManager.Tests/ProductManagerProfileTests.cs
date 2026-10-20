@@ -240,7 +240,7 @@ public sealed class ProductManagerProfileTests
                 ManagementEvents.ResourceChangeDecided,
                 StaffingReplenishmentEvents.Decided,
                 WorkforceEvents.Changed,
-                ProductManagerProfile.RecommendationFulfilledEvent, DelegationCapabilities.Received, DelegationCapabilities.Changed, ProjectHealthEvents.OwnerReportRequested
+                ProductManagerProfile.RecommendationFulfilledEvent, DelegationCapabilities.Received, DelegationCapabilities.Changed, ProjectHealthEvents.OwnerReportRequested, ProductTicketDiscussion.Changed
             ],
             root.GetProperty("events").GetProperty("subscribes").EnumerateArray()
                 .Select(item => item.GetString()!).ToArray());

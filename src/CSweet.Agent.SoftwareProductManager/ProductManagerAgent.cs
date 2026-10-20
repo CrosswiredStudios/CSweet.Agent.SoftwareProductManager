@@ -31,7 +31,7 @@ public sealed partial class ProductManagerAgent : CSweetManagerAgentBase
     internal const int DefaultContextWindowTokens = 256_000;
     internal const int DefaultOutputTokens = 128_000;
     private const int MinimumOutputTokens = 2_048;
-    private const string BoundedHiringSystemPrompt = """
+    internal const string BoundedHiringSystemPrompt = """
         You are the Software Product Manager completing one bounded staffing action from authoritative
         manager direction. Design the smallest cross-functional product team that can deliver the
         stated outcome safely. Call request_resource_change_approval exactly once. Do not write a
@@ -39,6 +39,11 @@ public sealed partial class ProductManagerAgent : CSweetManagerAgentBase
         that call. Give every slot a stable high-level roleCategoryKey and put optional domain
         preferences only in preferredSpecializationKeys. Roles reporting directly to the Product
         Manager must omit reportsToRoleKey.
+        Set humanRequired=false unless the authenticated manager or an authoritative role constraint
+        explicitly requires a human. An independent role does not imply a human hire. Do not add
+        dependencies or constraints absent from the authoritative brief. Use canonical platform
+        role categories for software-architect, software-developer and software-qa; keep domain
+        preferences separate from enforceable platform capabilities.
         """;
     private static readonly TimeSpan InternalReviewDelay = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan CoworkerFollowUpDelay = TimeSpan.FromMinutes(30);
@@ -200,6 +205,8 @@ or denied. Otherwise perform the task and return a concise completion summary.
     {
         if (!Guid.TryParse(context.InstallationId, out var installationId))
             return;
+        await ProductTicketDiscussion.RecoverAsync(context, ct => DiscussionClientAsync(context, ct), cancellationToken);
+        if (await ReconcileAssignedProjectAsync(context, cancellationToken)) return;
         var started = Stopwatch.StartNew();
         var actions = new List<string>();
         var conditions = new SortedSet<string>(StringComparer.Ordinal);
@@ -1121,6 +1128,8 @@ Keep all tickets in Backlog and leave dates, estimates, repository details, and 
             .FirstOrDefault();
         if (requestedSprint is null)
             return PersonalTodoResult.Blocked("The planned sprint no longer exists on the PM-managed board.");
+        if (requestedSprint.Status != "Planned")
+            return PersonalTodoResult.Completed($"Sprint {requestedSprint.Name} is already {requestedSprint.Status}; this readiness commitment cannot start a successor.");
         if (sprint is null)
             return PersonalTodoResult.Completed($"Sprint {requestedSprint.Name} is already {requestedSprint.Status}.");
         if (sprint.Id != sprintId)
@@ -2394,6 +2403,15 @@ Keep all tickets in Backlog and leave dates, estimates, repository details, and 
         AgentRuntimeContext context,
         CancellationToken cancellationToken)
     {
+        if (message.EventType == ProductTicketDiscussion.Changed)
+        {
+            ProductTicketDiscussion.Hint? hint;
+            try { hint = message.Data.Deserialize<ProductTicketDiscussion.Hint>(IncrementalJsonOptions); }
+            catch (JsonException) { return; }
+            if (hint is not null)
+                await ProductTicketDiscussion.RespondAsync(hint, context, ct => DiscussionClientAsync(context, ct), cancellationToken);
+            return;
+        }
         if (message.EventType == WorkDeliveryCapabilities.Changed)
         {
             await HandleAttentionReviewAsync(new AgentAttentionReviewContext(message.EventId, message.OccurredAt,
@@ -4392,6 +4410,8 @@ Do not claim that roles are approved, sourced, or hired, and do not invoke an ac
             ? []
             : (await runtimeContext.GetModelToolsAsync(
                 productManagerModelCapabilities, cancellationToken)).ToList();
+        if (!resourceChangeOnly && !suppressPlatformTools)
+            tools.AddRange(DeliveryTools(runtimeContext));
         tools.Add(AIFunctionFactory.Create(
             async (CancellationToken token) =>
             {
