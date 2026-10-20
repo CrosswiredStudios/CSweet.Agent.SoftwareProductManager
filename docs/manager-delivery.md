@@ -50,3 +50,5 @@ After publishing, install through the normal package review and hire flow. Live 
 verify current project membership/management, an actual prepared plan, preflight, independent
 source review and a directed manager question round trip before broader use. Unit and synthetic
 model checks do not constitute that live acceptance.
+
+Version 4.1.1 keeps TryWakeStaffingCommitmentAsync from consuming existing-project chat and retires pre-assignment staffing callbacks through ReconcileStaffingCommitmentAsync after current assignment checks. Stale ownership is reported without falling back to team design.

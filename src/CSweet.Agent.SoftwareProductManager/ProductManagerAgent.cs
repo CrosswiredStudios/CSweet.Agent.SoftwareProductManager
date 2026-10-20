@@ -675,6 +675,10 @@ or denied. Otherwise perform the task and return a concise completion summary.
             installationId != staffingInstallationId)
             return PersonalTodoResult.Blocked("The staffing commitment belongs to another installation.");
 
+        if (await ReconcileAssignedProjectAsync(context, cancellationToken))
+            return PersonalTodoResult.Completed(
+                "Initial team design is superseded by the retained project assignment. Current management checks were reported; no replacement team was proposed.");
+
         var resourceChanges = await context.Platform.ReadResourceChangesAsync(
             new ResourceChangeReadRequest(), cancellationToken);
         var latest = resourceChanges.Requests
@@ -2963,11 +2967,15 @@ Retry now. The ensure_software_team_board tool is required. Use its structured r
         return true;
     }
 
-    private async Task<bool> TryWakeStaffingCommitmentAsync(
+    internal async Task<bool> TryWakeStaffingCommitmentAsync(
         CommunicationMessageReceivedEvent incoming,
         AgentRuntimeContext context,
         CancellationToken cancellationToken)
     {
+        // A manager of an existing project handles its current request through the normal
+        // conversation tools. A pre-assignment staffing commitment must not consume it.
+        if (context.Identity?.AssignedProject is not null) return false;
+
         if (!Guid.TryParse(context.InstallationId, out var installationId) ||
             !Guid.TryParse(incoming.ConversationId, out var conversationId) ||
             incoming.Context is null ||

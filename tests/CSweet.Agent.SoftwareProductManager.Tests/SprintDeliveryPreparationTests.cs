@@ -174,6 +174,48 @@ public sealed class SprintDeliveryPreparationTests
         Assert.Equal(0, f.CreatedTickets); Assert.Empty(f.Plans);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Retained_project_chat_is_not_intercepted_by_initial_staffing(bool staleManagement)
+    {
+        var f = new Fixture();
+        var identity = f.Context.Identity! with { AssignedProject = new(f.Project.Id, "Existing project", f.Board.TeamId, f.Board.Id, "manager", 1, DateTimeOffset.UtcNow) };
+        if (staleManagement) f.Board = f.Board with { ManagerOrganizationUserId = Guid.NewGuid() };
+        var context = f.Runtime.CreateContext(Guid.NewGuid().ToString(), f.Installation.ToString(), identity);
+        var agent = new ProductManagerAgent(Microsoft.Extensions.Logging.Abstractions.NullLogger<ProductManagerAgent>.Instance,
+            new ProductManagerOrchestrator(Microsoft.Extensions.Logging.Abstractions.NullLogger<ProductManagerOrchestrator>.Instance));
+        var incoming = new CommunicationMessageReceivedEvent(Guid.NewGuid(), Guid.NewGuid().ToString(), f.Reviewer.ToString(),
+            "Prepare only the existing sprint. Do not propose a replacement team.",
+            new Dictionary<string, string> {
+                [CommunicationMessageContextKeys.SenderEmployeeType] = "Human",
+                [CommunicationMessageContextKeys.SenderOrganizationUserId] = f.Reviewer.ToString() });
+        // No organization, staffing, personal-queue or requeue capability is registered.
+        // Even a stale assignment must reach current authorization checks rather than initial hiring.
+        Assert.False(await agent.TryWakeStaffingCommitmentAsync(incoming, context, default));
+        Assert.Equal(0, f.CreatedTickets); Assert.Equal(0, f.ConfiguredPlans);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Old_initial_staffing_callback_retires_after_project_assignment(bool staleManagement)
+    {
+        var f = new Fixture();
+        var identity = f.Context.Identity! with { AssignedProject = new(f.Project.Id, "Existing project", f.Board.TeamId, f.Board.Id, "manager", 1, DateTimeOffset.UtcNow) };
+        if (staleManagement) f.Board = f.Board with { ManagerOrganizationUserId = Guid.NewGuid() };
+        var context = f.Runtime.CreateContext(Guid.NewGuid().ToString(), f.Installation.ToString(), identity);
+        var agent = new ProductManagerAgent(Microsoft.Extensions.Logging.Abstractions.NullLogger<ProductManagerAgent>.Instance,
+            new ProductManagerOrchestrator(Microsoft.Extensions.Logging.Abstractions.NullLogger<ProductManagerOrchestrator>.Instance));
+        var item = Empty<PersonalTodoItem>() with { Id = Guid.NewGuid(), CorrelationId = $"product-team-staffing:{f.Installation:N}" };
+        var result = await agent.HandlePersonalTodoAsync(item, context, default);
+        Assert.Equal(PersonalTodoResult.Completed(
+            "Initial team design is superseded by the retained project assignment. Current management checks were reported; no replacement team was proposed."), result);
+        Assert.Equal(staleManagement ? 0 : 1, f.PlanReads);
+        Assert.Equal(0, f.CreatedTickets); Assert.Equal(0, f.ConfiguredPlans); Assert.Equal(0, f.Starts);
+        // The normal personal-task result closes the obsolete commitment. No staffing mutation is registered.
+    }
+
     private static T Empty<T>() => JsonSerializer.Deserialize<T>("{}")!;
 
     private sealed class Fixture
