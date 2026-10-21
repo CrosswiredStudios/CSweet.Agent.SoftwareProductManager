@@ -9,6 +9,26 @@ namespace CSweet.Agent.SoftwareProductManager.Tests;
 public sealed class ProductTicketDiscussionTests
 {
     [Fact]
+    public async Task Reconciliation_persists_a_schema_valid_cursor_fingerprint_and_restarts_without_inference()
+    {
+        var f = new Fixture(); f.Comments.Clear();
+        var board = new WorkBoardSummary(Guid.NewGuid(), "Pilot", "Sprint", false, false, 1, []);
+        f.Context = f.Runtime.CreateContext(Guid.NewGuid().ToString(), f.Self.ToString(), f.Context.Identity! with
+        {
+            AssignedProject = new(Guid.NewGuid(), "Pilot", Guid.NewGuid(), board.Id, "Manager", 1, DateTimeOffset.UtcNow)
+        });
+        f.Runtime.RegisterCapability<JsonElement, JsonElement>(WorkItemCapabilities.Read, (r, token) => Task.FromResult(
+            r.TryGetProperty("itemId", out _) ? JsonSerializer.SerializeToElement(f.Item) :
+            JsonSerializer.SerializeToElement(new WorkBoardDetail(board, [], [f.Item]))));
+        await ProductTicketDiscussion.RecoverAsync(f.Context, _ => Task.FromResult<IChatClient>(f.Model), default);
+        var first = f.States["product-discussion-cursor"];
+        Assert.Matches("^[a-f0-9]{64}$", first.DecisionFingerprint);
+        await ProductTicketDiscussion.RecoverAsync(f.Context, _ => Task.FromResult<IChatClient>(f.Model), default);
+        Assert.Equal(first.DecisionFingerprint, f.States["product-discussion-cursor"].DecisionFingerprint);
+        Assert.Equal(0, f.Model.Calls); Assert.Equal(0, f.Posts);
+    }
+
+    [Fact]
     public async Task Directed_reply_is_durable_correlated_and_duplicate_wakes_do_not_repeat_inference()
     {
         var f = new Fixture();
@@ -116,13 +136,14 @@ public sealed class ProductTicketDiscussionTests
         internal List<WorkItemComment> Comments = [];
         internal Dictionary<string, AgentOperatingStateResponse> States = [];
         internal Model Model = new();
+        internal AgentTestRuntime Runtime = new();
         internal bool FailPost, EffectBeforeFailure, DenyPost, EndlessPages;
         internal int Posts, Reads;
         internal Fixture()
         {
             Question = new(Guid.NewGuid(), Item.Id, "OrganizationUser", Guid.NewGuid(), "Owner", "@Maya: Which label meets the accepted scope?", 1, DateTimeOffset.UtcNow, null) { Kind = "discussion.request" };
             Comments.Add(Question); Hint = new(Guid.NewGuid(), Item.Id, Question.Id, 1, true);
-            var runtime = new AgentTestRuntime();
+            var runtime = Runtime;
             Context = runtime.CreateContext(Guid.NewGuid().ToString(), Self.ToString(), new(Guid.NewGuid().ToString(), "Maya", null, "Product Manager", null, [], null, null, null));
             runtime.RegisterCapability<WorkItemReference, WorkItem>(WorkItemCapabilities.Read, (_, _) => Task.FromResult(Item));
             runtime.RegisterCapability<ReadWorkItemCommentsRequest, WorkItemCommentPage>(WorkItemCapabilities.ReadComments, (r, _) => {
@@ -130,6 +151,7 @@ public sealed class ProductTicketDiscussionTests
             runtime.RegisterCapability<AgentOperatingStateReadRequest, AgentOperatingStateReadResponse>(PlatformCapabilities.AgentOperatingStateRead,
                 (r, _) => Task.FromResult(new AgentOperatingStateReadResponse(States.GetValueOrDefault(r.StateKey))));
             runtime.RegisterCapability<AgentOperatingStateWriteRequest, AgentOperatingStateResponse>(PlatformCapabilities.AgentOperatingStateWrite, (r, _) => {
+                Assert.Matches("^[a-f0-9]{64}$", r.DecisionFingerprint);
                 var state = new AgentOperatingStateResponse(Guid.NewGuid(), r.StateKey, r.SchemaId, r.SchemaVersion, r.Status, r.SourceRevisions,
                     r.ConditionCodes, r.DecisionFingerprint, r.OpenCommitmentCorrelations, r.AttentionReviewId, r.Payload, (r.ExpectedRevision ?? 0) + 1, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
                 States[r.StateKey] = state; return Task.FromResult(state);
