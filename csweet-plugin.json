@@ -16,7 +16,7 @@
   },
   "id": "com.csweet.product-manager",
   "name": "Maya Patel",
-  "version": "4.1.1",
+  "version": "4.1.2",
   "publisher": {
     "id": "com.csweet",
     "name": "C-Sweet"
@@ -1398,6 +1398,18 @@
     }
   ],
   "requires": [
+    {
+      "name": "platform.project-assignment.read.v1",
+      "scope": "organization",
+      "purpose": "Receive the current server-resolved project assignment for this employee before reconciling existing-project work.",
+      "modelVisible": false
+    },
+    {
+      "name": "platform.workstream.read.v1",
+      "scope": "organization",
+      "purpose": "Verify current project state and accountable management before preparing the selected authorized delivery scope.",
+      "modelVisible": false
+    },
     {
       "name": "work.delivery.read.v1",
       "scope": "organization",

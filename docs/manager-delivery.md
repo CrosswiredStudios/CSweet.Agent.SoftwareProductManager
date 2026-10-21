@@ -52,3 +52,5 @@ source review and a directed manager question round trip before broader use. Uni
 model checks do not constitute that live acceptance.
 
 Version 4.1.1 keeps TryWakeStaffingCommitmentAsync from consuming existing-project chat and retires pre-assignment staffing callbacks through ReconcileStaffingCommitmentAsync after current assignment checks. Stale ownership is reported without falling back to team design.
+
+Version 4.1.2 declares adapter-only project-assignment and workstream reads. The platform withholds project identity unless the assignment read is granted. SprintDeliveryPreparationTests restricts fake grants to the packaged manifest and checks revocation before delivery mutations. Updating an installation requires review of these two reads.

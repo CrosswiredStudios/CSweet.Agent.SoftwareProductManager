@@ -2,7 +2,7 @@
 
 This document is the human-readable grant catalog for the C-Sweet Software Product Manager agent. The source
 of truth for installation authorization remains [`csweet-plugin.json`](csweet-plugin.json). This
-catalog was last verified against package version `4.1.0` and manifest protocol `2.0`.
+catalog was last verified against package version `4.1.2` and manifest protocol `2.0`.
 
 Serialized capability names are sourced from the authoritative `CapabilityCatalog` in
 `CSweet.Agent.SDK` 5.0.2; manifest-audit tests reject names missing from that catalog.
@@ -34,6 +34,8 @@ policy at runtime.
 
 | Grant | Scope | Feature |
 |---|---|---|
+| `platform.project-assignment.read.v1` | organization | Receive this employee's server-resolved current project assignment. Adapter-only; no model tool. |
+| `platform.workstream.read.v1` | organization | Verify current project state and accountable management before selected-sprint preparation. Adapter-only; no model tool. |
 | `platform.business-profile.read.v1` | organization | Read the authoritative business and product context. |
 | `platform.business-profile.propose-update.v1` | organization | Propose sensitive or inferred business-profile changes for review. |
 | `platform.organization.snapshot.read.v1` | organization | Validate identity, manager, reporting lines, objectives, workstreams, roles, and available workers. |
