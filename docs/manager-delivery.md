@@ -64,3 +64,8 @@ Version 4.1.4 preserves the canonical platform-owned task-integration principal 
 rejection and does not authorize a retry or further mutations. Cancellation still propagates.
 `ProductTicketDiscussion.RecoverAsync` fingerprints the board, bounded cursor position and current
 item revisions before saving its recovery cursor through the typed operating-state client.
+
+`ValidateStageAssignments` checks retained identity, availability and reviewer independence.
+Roster `EffectiveCapabilities` lists granted platform operations, rather than the agent's
+provided callbacks. The platform's typed planning and finalization operations remain the
+authority for execution eligibility; their rejection cannot be replaced by roster membership.

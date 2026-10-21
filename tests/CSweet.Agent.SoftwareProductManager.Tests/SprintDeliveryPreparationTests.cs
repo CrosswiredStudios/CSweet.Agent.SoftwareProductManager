@@ -9,6 +9,21 @@ namespace CSweet.Agent.SoftwareProductManager.Tests;
 public sealed class SprintDeliveryPreparationTests
 {
     [Fact]
+    public async Task Current_platform_eligibility_denial_cannot_be_replaced_by_retained_roster_membership()
+    {
+        var f = new Fixture(); var original = f.Items[0];
+        f.Items[0] = original with { Planning = null, Development = new(f.Repositories[0].RepositoryId, "certified",
+            original.Planning!.Requirements, original.Planning.AcceptanceCriteria, original.Planning.Constraints) };
+        f.Runtime.RegisterCapability<ReviseWorkItemPlanningRequest, WorkItem>(WorkItemCapabilities.RevisePlanning,
+            (_, _) => throw new PlatformCapabilityException(WorkItemCapabilities.RevisePlanning,
+                PlatformCapabilityErrorCode.Denied, "The retained installation is not currently eligible."));
+        var result = await ProductManagerAgent.RunDeliveryToolAsync(() => LegacyBriefPlanning.AdoptAsync(
+            f.Board.Id, original.Id, original.Revision, f.Context, default));
+        Assert.False(result.Succeeded); Assert.Equal("Denied", result.ErrorCode); Assert.Null(result.Value);
+        Assert.Null(f.Items[0].Planning); Assert.Equal(0, f.PlanningWrites); Assert.Equal(0, f.ConfiguredPlans);
+    }
+
+    [Fact]
     public async Task Delivery_tool_returns_actionable_denials_without_a_success_receipt_and_propagates_cancellation()
     {
         var f = new Fixture();
@@ -415,7 +430,8 @@ public sealed class SprintDeliveryPreparationTests
             Items.AddRange([Item(Sprint.Id), Item(Sprint.Id)]); Outside = Item(null); Items.Add(Outside);
             var members = Items.SelectMany(x => x.StageAssignments).Where(x => x.PrincipalKind == "AgentInstallation")
                 .Select(x => new AgentTeammate(x.OrganizationUserId!.Value.ToString(), "Developer", "Agent", null, null, "Report", "Online")
-                    { AgentInstallationId = x.AgentInstallationId, EffectiveCapabilities = [WorkManagementCapabilityNames.ExecutionRun] }).ToList();
+                    // The live roster exposes platform grants, not the agent's provided callbacks.
+                    { AgentInstallationId = x.AgentInstallationId, EffectiveCapabilities = [WorkItemCapabilities.Read, WorkItemCapabilities.Comment] }).ToList();
             members.Add(new(Reviewer.ToString(), "Reviewer", "Human", null, null, "Peer", "Online"));
             members.Add(new(Manager.ToString(), "Maya", "Agent", null, null, "Self", "Online") { AgentInstallationId = Installation });
             Roster = new(Board.TeamId!.Value.ToString(), "team", "Team", 1, Manager.ToString(), "Maya", members, [], members.Count, false);
