@@ -160,9 +160,10 @@ internal static class SprintDeliveryPreparation
             var member = roster.Members.SingleOrDefault(x => x.EmployeeId == principal.OrganizationUserId?.ToString() && x.IsAvailable);
             if (member is null || (principal.PrincipalKind == "Human"
                     ? member.EmployeeType != "Human" || principal.AgentInstallationId is not null
-                    : member.AgentInstallationId != principal.AgentInstallationId || !principal.AgentInstallationId.HasValue ||
-                      !member.EffectiveCapabilities.Contains(WorkManagementCapabilityNames.ExecutionRun)))
+                    : member.AgentInstallationId != principal.AgentInstallationId || !principal.AgentInstallationId.HasValue))
                 throw new InvalidOperationException("Retain an exact available team employee and installation for every assigned stage; resolve staffing before preparing a plan.");
+            // EffectiveCapabilities contains platform grants, not provided callbacks. The typed
+            // planning/finalization operations validate the retained installation's execution eligibility.
             if (principal.StageKey is "technical-review" or "quality" && principal.OrganizationUserId == author.OrganizationUserId)
                 throw new InvalidOperationException("The implementation author cannot perform independent technical review or quality review.");
         }
