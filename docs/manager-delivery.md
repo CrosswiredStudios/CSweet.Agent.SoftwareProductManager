@@ -58,3 +58,9 @@ Version 4.1.2 declares adapter-only project-assignment and workstream reads. The
 Version 4.1.3 confines ProductModelToolsAsync to public model bindings. LegacyBriefPlanning.AdoptAsync exposes exact retained-brief adoption through adopt_developer_brief; it rejects changed or incomplete bindings before the typed revision-checked write. It preserves requirements, criteria, constraints and existing reviewer identities, and cannot replace existing planning or quality/rework bindings.
 
 Version 4.1.4 preserves the canonical platform-owned task-integration principal through ValidateStageAssignments. It never resolves that platform action as an employee, and rejects unknown actions, actor identities or duplicate stage bindings.
+
+`RunDeliveryToolAsync` returns `DeliveryToolResult<T>` for adoption and preparation. Check
+`Succeeded` before using `Value` as a receipt; a failed result contains the guard or broker
+rejection and does not authorize a retry or further mutations. Cancellation still propagates.
+`ProductTicketDiscussion.RecoverAsync` fingerprints the board, bounded cursor position and current
+item revisions before saving its recovery cursor through the typed operating-state client.

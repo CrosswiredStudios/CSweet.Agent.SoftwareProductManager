@@ -105,9 +105,14 @@ internal static class ProductTicketDiscussion
                 foreach (var question in thread.Where(x => NeedsReply(x, thread, context.Identity.DisplayName, self)).Take(2))
                     await RespondAsync(new(board, item.Id, question.Id, question.Revision, true), context, clientFactory, ct);
             }
+            var next = (start + Math.Min(5, items.Length)) % items.Length;
+            var fingerprint = Convert.ToHexStringLower(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(new
+            {
+                board, next, items = items.Select(x => new { x.Id, x.Revision })
+            }, Json)));
             await context.Platform.WriteOperatingStateAsync(new WriteAgentOperatingStateRequest<int>("product-discussion-cursor",
-                "product-manager.discussion-cursor.v1", 1, "Active", new Dictionary<string, string>(), [], "", [], Guid.NewGuid(),
-                (start + Math.Min(5, items.Length)) % items.Length, cursor?.Revision,
+                "product-manager.discussion-cursor.v1", 1, "Active", new Dictionary<string, string>(), [], fingerprint, [], Guid.NewGuid(),
+                next, cursor?.Revision,
                 $"pm-discussion-cursor:{cursor?.Revision ?? 0}:{start}:{items.Length}"), ct);
         }
         catch (PlatformCapabilityException error) when (error.Code is PlatformCapabilityErrorCode.Denied or PlatformCapabilityErrorCode.NotFound)

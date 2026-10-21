@@ -8,6 +8,25 @@ namespace CSweet.Agent.SoftwareProductManager.Tests;
 
 public sealed class SprintDeliveryPreparationTests
 {
+    [Fact]
+    public async Task Delivery_tool_returns_actionable_denials_without_a_success_receipt_and_propagates_cancellation()
+    {
+        var f = new Fixture();
+        var tool = ProductManagerAgent.DeliveryTools(f.Context).Cast<AIFunction>().Single(x => x.Name == "adopt_developer_brief");
+        var output = Assert.IsType<JsonElement>(await tool.InvokeAsync(new AIFunctionArguments
+        {
+            ["boardId"] = f.Board.Id.ToString(), ["itemId"] = f.Items[0].Id.ToString(), ["expectedRevision"] = 0L
+        }));
+        var blocked = output.Deserialize<ProductManagerAgent.DeliveryToolResult<WorkItem>>(new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
+        Assert.False(blocked.Succeeded); Assert.Null(blocked.Value);
+        Assert.Equal("Precondition", blocked.ErrorCode); Assert.Contains("current Ready", blocked.Error);
+        Assert.Equal(0, f.PlanningWrites);
+        var denied = await ProductManagerAgent.RunDeliveryToolAsync<WorkItem>(() => throw new PlatformCapabilityException(
+            WorkItemCapabilities.RevisePlanning, PlatformCapabilityErrorCode.Denied, "Current assignment no longer authorizes planning."));
+        Assert.False(denied.Succeeded); Assert.Equal("Denied", denied.ErrorCode); Assert.Null(denied.Value);
+        await Assert.ThrowsAsync<OperationCanceledException>(() => ProductManagerAgent.RunDeliveryToolAsync<WorkItem>(() => throw new OperationCanceledException()));
+    }
+
     [Theory]
     [InlineData("action")]
     [InlineData("stage")]
@@ -59,7 +78,15 @@ public sealed class SprintDeliveryPreparationTests
             original.Planning!.Requirements, original.Planning.AcceptanceCriteria, original.Planning.Constraints);
         f.Items[0] = original with { Planning = null, Development = brief,
             StageAssignments = original.StageAssignments.Select(x => x.PrincipalKind == "AgentInstallation" ? x with { OrganizationUserId = null } : x).ToArray() };
-        var result = await LegacyBriefPlanning.AdoptAsync(f.Board.Id, original.Id, original.Revision, f.Context, default);
+        var tool = ProductManagerAgent.DeliveryTools(f.Context).Cast<AIFunction>().Single(x => x.Name == "adopt_developer_brief");
+        var output = Assert.IsType<JsonElement>(await tool.InvokeAsync(new AIFunctionArguments
+        {
+            ["boardId"] = f.Board.Id.ToString(), ["itemId"] = original.Id.ToString(),
+            ["expectedRevision"] = original.Revision
+        }));
+        var receipt = output.Deserialize<ProductManagerAgent.DeliveryToolResult<WorkItem>>(new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
+        Assert.True(receipt.Succeeded, receipt.Error);
+        var result = Assert.IsType<WorkItem>(receipt.Value);
         Assert.Equal(brief.Requirements, result.Planning!.Requirements);
         Assert.Equal(brief.AcceptanceCriteria, result.Planning.AcceptanceCriteria);
         Assert.Equal(brief.Constraints, result.Planning.Constraints);
