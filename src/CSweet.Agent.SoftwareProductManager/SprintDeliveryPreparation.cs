@@ -145,14 +145,17 @@ internal static class SprintDeliveryPreparation
 
     internal static void ValidateStageAssignments(WorkItem task, AgentTeamContext roster)
     {
-        if (task.StageAssignments.Any(x => x.PrincipalKind is not ("Human" or "AgentInstallation")) ||
+        static bool PlatformIntegration(WorkStageAssignment stage) => stage.PrincipalKind == "PlatformAction" &&
+            stage.StageKey == "task-integration" && stage.PlatformAction == HierarchicalWorkflows.TaskIntegrationAction &&
+            stage.OrganizationUserId is null && stage.AgentInstallationId is null;
+        if (task.StageAssignments.Any(x => x.PrincipalKind is not ("Human" or "AgentInstallation") && !PlatformIntegration(x)) ||
             task.StageAssignments.GroupBy(x => x.StageKey).Any(x => x.Count() != 1))
             throw new InvalidOperationException("Retain one exact supported principal per assigned stage.");
         var author = task.StageAssignments.SingleOrDefault(x => x.StageKey is "development" or "specialist-execution");
         if (author?.OrganizationUserId is null || !task.StageAssignments.Any(x => x.StageKey == "technical-review") ||
             !task.StageAssignments.Any(x => x.StageKey == "quality"))
             throw new InvalidOperationException("Code preparation requires an exact author and the existing independent technical and quality reviewers.");
-        foreach (var principal in task.StageAssignments)
+        foreach (var principal in task.StageAssignments.Where(x => !PlatformIntegration(x)))
         {
             var member = roster.Members.SingleOrDefault(x => x.EmployeeId == principal.OrganizationUserId?.ToString() && x.IsAvailable);
             if (member is null || (principal.PrincipalKind == "Human"

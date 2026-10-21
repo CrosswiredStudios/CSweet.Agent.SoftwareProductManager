@@ -8,6 +8,30 @@ namespace CSweet.Agent.SoftwareProductManager.Tests;
 
 public sealed class SprintDeliveryPreparationTests
 {
+    [Theory]
+    [InlineData("action")]
+    [InlineData("stage")]
+    [InlineData("employee")]
+    [InlineData("installation")]
+    [InlineData("duplicate")]
+    public async Task Unknown_or_impersonated_platform_principal_cannot_pass_delivery_validation(string scenario)
+    {
+        var f = new Fixture(); var item = f.Items[0];
+        var platform = item.StageAssignments.Single(x => x.PrincipalKind == "PlatformAction");
+        var changed = scenario switch
+        {
+            "action" => platform with { PlatformAction = "arbitrary.execute" },
+            "stage" => platform with { StageKey = "technical-review" },
+            "employee" => platform with { OrganizationUserId = f.Reviewer },
+            "installation" => platform with { AgentInstallationId = f.Installation },
+            _ => platform
+        };
+        f.Items[0] = item with { StageAssignments = scenario == "duplicate" ? item.StageAssignments.Append(platform).ToArray() :
+            item.StageAssignments.Select(x => x == platform ? changed : x).ToArray() };
+        await Assert.ThrowsAsync<InvalidOperationException>(f.Prepare);
+        Assert.Equal(0, f.CreatedTickets); Assert.Equal(0, f.ConfiguredPlans); Assert.Equal(0, f.Activations);
+    }
+
     [Fact]
     public async Task Chat_tools_exclude_platform_hidden_operations_and_keep_exact_visible_binding_checks()
     {
@@ -359,7 +383,8 @@ public sealed class SprintDeliveryPreparationTests
                 Revision = 1, PlanningRevision = 1, AccountableOrganizationUserId = Manager,
                 Planning = new(["Retained requirement"], ["Retained criterion"], ["No deployment"]),
                 StageAssignments = [new("development", "AgentInstallation", Guid.NewGuid(), Guid.NewGuid()),
-                    new("technical-review", "Human", Reviewer), new("quality", "Human", Reviewer)] };
+                    new("technical-review", "Human", Reviewer), new("quality", "Human", Reviewer),
+                    new("task-integration", "PlatformAction", PlatformAction: "source-control.task.integrate.v1")] };
             Items.AddRange([Item(Sprint.Id), Item(Sprint.Id)]); Outside = Item(null); Items.Add(Outside);
             var members = Items.SelectMany(x => x.StageAssignments).Where(x => x.PrincipalKind == "AgentInstallation")
                 .Select(x => new AgentTeammate(x.OrganizationUserId!.Value.ToString(), "Developer", "Agent", null, null, "Report", "Online")
