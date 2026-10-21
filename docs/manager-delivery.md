@@ -54,3 +54,5 @@ model checks do not constitute that live acceptance.
 Version 4.1.1 keeps TryWakeStaffingCommitmentAsync from consuming existing-project chat and retires pre-assignment staffing callbacks through ReconcileStaffingCommitmentAsync after current assignment checks. Stale ownership is reported without falling back to team design.
 
 Version 4.1.2 declares adapter-only project-assignment and workstream reads. The platform withholds project identity unless the assignment read is granted. SprintDeliveryPreparationTests restricts fake grants to the packaged manifest and checks revocation before delivery mutations. Updating an installation requires review of these two reads.
+
+Version 4.1.3 confines ProductModelToolsAsync to public model bindings. LegacyBriefPlanning.AdoptAsync exposes exact retained-brief adoption through adopt_developer_brief; it rejects changed or incomplete bindings before the typed revision-checked write. It preserves requirements, criteria, constraints and existing reviewer identities, and cannot replace existing planning or quality/rework bindings.
