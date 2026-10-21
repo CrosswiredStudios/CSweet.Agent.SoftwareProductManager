@@ -199,6 +199,11 @@ public sealed class ProductManagerProfileTests
         Assert.Contains(WorkOrchestrationCapabilities.Read, requires);
         Assert.Contains(AgentLifecycleCapabilities.CompleteOnboarding, requires);
         Assert.Contains(MemoryCapabilities.BusinessRead, requires);
+        foreach (var capability in new[] { PlatformCapabilities.ProjectAssignmentRead, PlatformCapabilities.WorkstreamRead })
+        {
+            var declaration = root.GetProperty("requires").EnumerateArray().Single(x => x.GetProperty("name").GetString() == capability);
+            Assert.False(declaration.GetProperty("modelVisible").GetBoolean());
+        }
     }
 
     [Fact]

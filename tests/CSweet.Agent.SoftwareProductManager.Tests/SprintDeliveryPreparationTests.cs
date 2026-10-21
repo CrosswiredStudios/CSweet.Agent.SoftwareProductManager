@@ -8,6 +8,39 @@ namespace CSweet.Agent.SoftwareProductManager.Tests;
 
 public sealed class SprintDeliveryPreparationTests
 {
+    [Theory]
+    [InlineData(null)]
+    [InlineData(PlatformCapabilities.ProjectAssignmentRead)]
+    [InlineData(PlatformCapabilities.WorkstreamRead)]
+    public async Task Packaged_grants_enable_existing_project_delivery_and_revocation_fails_before_mutation(string? revokedCapability)
+    {
+        var f = new Fixture(revokedCapability);
+        async Task Run()
+        {
+            var assignment = await f.Context.Platform.ReadProjectAssignmentAsync();
+            Assert.NotNull(assignment);
+            var identity = f.Context.Identity! with { AssignedProject = assignment };
+            var context = f.Runtime.CreateContext(Guid.NewGuid().ToString(), f.Installation.ToString(), identity);
+            var agent = new ProductManagerAgent(NullLogger<ProductManagerAgent>.Instance,
+                new ProductManagerOrchestrator(NullLogger<ProductManagerOrchestrator>.Instance));
+            var incoming = new CommunicationMessageReceivedEvent(Guid.NewGuid(), Guid.NewGuid().ToString(), f.Reviewer.ToString(),
+                "Prepare the existing sprint.", null);
+            Assert.False(await agent.TryWakeStaffingCommitmentAsync(incoming, context, default));
+            var prepared = await SprintDeliveryPreparation.PrepareAsync(f.Board.Id, f.Sprint.Id, context, default);
+            Assert.Equal("Active", prepared.Status);
+        }
+        if (revokedCapability is null)
+            await Run();
+        else
+        {
+            var error = await Assert.ThrowsAsync<PlatformCapabilityException>(Run);
+            Assert.Equal(PlatformCapabilityErrorCode.Denied, error.Code);
+            Assert.Equal(revokedCapability, error.Capability);
+            Assert.Equal(0, f.CreatedTickets); Assert.Equal(0, f.ConfiguredPlans); Assert.Equal(0, f.Activations);
+        }
+        Assert.Equal(0, f.Starts);
+    }
+
     [Fact]
     public async Task Prepares_only_the_selected_sprint_and_retains_its_exact_reviewers_without_start_or_promotion()
     {
@@ -114,7 +147,7 @@ public sealed class SprintDeliveryPreparationTests
     {
         var f = new Fixture();
         var successor = f.Sprint with { Id = Guid.NewGuid(), Sequence = 2 };
-        f.Runtime.RegisterCapability<WorkBoardReference, IReadOnlyList<WorkSprint>>(WorkSprintCapabilities.Read,
+        f.Grant<WorkBoardReference, IReadOnlyList<WorkSprint>>(WorkSprintCapabilities.Read,
             (_, _) => Task.FromResult<IReadOnlyList<WorkSprint>>([f.Sprint with { Status = status }, successor]));
         var item = Empty<PersonalTodoItem>() with { Id = Guid.NewGuid(), CorrelationId = $"product-sprint-readiness:{f.Board.Id:N}:{f.Sprint.Id:N}" };
         var agent = new ProductManagerAgent(NullLogger<ProductManagerAgent>.Instance, new(NullLogger<ProductManagerOrchestrator>.Instance));
@@ -134,7 +167,7 @@ public sealed class SprintDeliveryPreparationTests
     public async Task Discussion_tool_repeats_current_board_management_and_pagination_checks()
     {
         var f = new Fixture(); var reads = 0;
-        f.Runtime.RegisterCapability<ReadWorkItemCommentsRequest, WorkItemCommentPage>(WorkItemCapabilities.ReadComments, (r, _) => {
+        f.Grant<ReadWorkItemCommentsRequest, WorkItemCommentPage>(WorkItemCapabilities.ReadComments, (r, _) => {
             reads++; Assert.Equal(20, r.PageSize); Assert.Equal(f.Items[0].Id, r.ItemId);
             return Task.FromResult(new WorkItemCommentPage([], r.Page, r.PageSize, false, 1)); });
         var tool = ProductManagerAgent.DeliveryTools(f.Context).Cast<AIFunction>().Single(x => x.Name == "read_ticket_discussion");
@@ -237,9 +270,19 @@ public sealed class SprintDeliveryPreparationTests
         internal string? LoseResponse;
         internal bool DenyFinalize;
         private readonly Dictionary<string, WorkItem> _tickets = [];
-
-        internal Fixture()
+        private readonly HashSet<string> _requested;
+        internal void Grant<TRequest, TResponse>(string capability, Func<TRequest, CancellationToken, Task<TResponse>> handler)
         {
+            if (_requested.Contains(capability)) Runtime.RegisterCapability(capability, handler);
+        }
+
+        internal Fixture(string? revokedCapability = null)
+        {
+            var manifestDirectory = new DirectoryInfo(AppContext.BaseDirectory);
+            while (manifestDirectory is not null && !File.Exists(Path.Combine(manifestDirectory.FullName, "csweet-plugin.json"))) manifestDirectory = manifestDirectory.Parent;
+            using var manifest = JsonDocument.Parse(File.ReadAllText(Path.Combine(manifestDirectory!.FullName, "csweet-plugin.json")));
+            _requested = manifest.RootElement.GetProperty("requires").EnumerateArray().Select(x => x.GetProperty("name").GetString()!).ToHashSet();
+            if (revokedCapability is not null) _requested.Remove(revokedCapability);
             Board = new(Guid.NewGuid(), "PM", "Sprint", false, false, 1, [])
             { ManagerOrganizationUserId = Manager, TeamId = Guid.NewGuid(), WorkstreamId = Guid.NewGuid() };
             Project = Empty<WorkstreamDetail>() with { Id = Board.WorkstreamId!.Value, AccountableManagerOrganizationUserId = Manager, Status = "Active" };
@@ -259,30 +302,32 @@ public sealed class SprintDeliveryPreparationTests
             Roster = new(Board.TeamId!.Value.ToString(), "team", "Team", 1, Manager.ToString(), "Maya", members, [], members.Count, false);
             Repositories.Add(new(Guid.NewGuid(), "Source", "InternalGit", "source", "main", "PullRequest"));
             Context = Runtime.CreateContext(Guid.NewGuid().ToString(), Installation.ToString(), new(Manager.ToString(), "Maya", null, "Product Manager", null, [], null, Guid.NewGuid().ToString(), "Owner"));
-            Runtime.RegisterCapability<JsonElement, JsonElement>(WorkItemCapabilities.Read, (r, _) => Task.FromResult(
+            Grant<JsonElement, JsonElement>(WorkItemCapabilities.Read, (r, _) => Task.FromResult(
                 r.TryGetProperty("itemId", out var id) ? JsonSerializer.SerializeToElement(Items.Single(x => x.Id == id.GetGuid())) :
                 JsonSerializer.SerializeToElement(new WorkBoardDetail(Board, [], Items))));
-            Runtime.RegisterCapability<ReadWorkstreamRequest, WorkstreamDetail>(PlatformCapabilities.WorkstreamRead, (_, _) => Task.FromResult(Project));
-            Runtime.RegisterCapability<TeamRosterRequest, TeamRosterResponse>(PlatformCapabilities.TeamRosterRead, (_, _) => Task.FromResult(new TeamRosterResponse(Roster)));
-            Runtime.RegisterCapability<WorkBoardReference, IReadOnlyList<WorkSprint>>(WorkSprintCapabilities.Read, (_, _) => Task.FromResult<IReadOnlyList<WorkSprint>>([Sprint]));
-            Runtime.RegisterCapability<TeamRepositoryOptionsRequest, IReadOnlyList<TeamRepositoryOption>>(SourceControlCapabilities.TeamRepositoryOptions, (_, _) => Task.FromResult<IReadOnlyList<TeamRepositoryOption>>(Repositories));
-            Runtime.RegisterCapability<ReadWorkDeliveryPlansRequest, IReadOnlyList<WorkDeliveryPlanResponse>>(WorkDeliveryCapabilities.Read,
+            Grant<object, ProjectAssignmentResponse>(PlatformCapabilities.ProjectAssignmentRead, (_, _) => Task.FromResult(new ProjectAssignmentResponse(
+                new(Project.Id, "Existing project", Board.TeamId, Board.Id, "Manager", 1, DateTimeOffset.UtcNow))));
+            Grant<ReadWorkstreamRequest, WorkstreamDetail>(PlatformCapabilities.WorkstreamRead, (_, _) => Task.FromResult(Project));
+            Grant<TeamRosterRequest, TeamRosterResponse>(PlatformCapabilities.TeamRosterRead, (_, _) => Task.FromResult(new TeamRosterResponse(Roster)));
+            Grant<WorkBoardReference, IReadOnlyList<WorkSprint>>(WorkSprintCapabilities.Read, (_, _) => Task.FromResult<IReadOnlyList<WorkSprint>>([Sprint]));
+            Grant<TeamRepositoryOptionsRequest, IReadOnlyList<TeamRepositoryOption>>(SourceControlCapabilities.TeamRepositoryOptions, (_, _) => Task.FromResult<IReadOnlyList<TeamRepositoryOption>>(Repositories));
+            Grant<ReadWorkDeliveryPlansRequest, IReadOnlyList<WorkDeliveryPlanResponse>>(WorkDeliveryCapabilities.Read,
                 (r, _) => { PlanReads++; return Task.FromResult<IReadOnlyList<WorkDeliveryPlanResponse>>(Plans.Where(x => r.PlanId is null || x.Id == r.PlanId).ToArray()); });
-            Runtime.RegisterCapability<AgentOperatingStateReadRequest, AgentOperatingStateReadResponse>(PlatformCapabilities.AgentOperatingStateRead,
+            Grant<AgentOperatingStateReadRequest, AgentOperatingStateReadResponse>(PlatformCapabilities.AgentOperatingStateRead,
                 (r, _) => Task.FromResult(new AgentOperatingStateReadResponse(States.GetValueOrDefault(r.StateKey))));
-            Runtime.RegisterCapability<AgentOperatingStateWriteRequest, AgentOperatingStateResponse>(PlatformCapabilities.AgentOperatingStateWrite, (r, _) => {
+            Grant<AgentOperatingStateWriteRequest, AgentOperatingStateResponse>(PlatformCapabilities.AgentOperatingStateWrite, (r, _) => {
                 Lose("state");
                 var state = new AgentOperatingStateResponse(Guid.NewGuid(), r.StateKey, r.SchemaId, r.SchemaVersion, r.Status,
                     r.SourceRevisions, r.ConditionCodes, r.DecisionFingerprint, r.OpenCommitmentCorrelations, r.AttentionReviewId, r.Payload, (r.ExpectedRevision ?? 0) + 1, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
                 States[r.StateKey] = state; Lose("state-after"); return Task.FromResult(state);
             });
-            Runtime.RegisterCapability<CreateWorkItemRequest, WorkItem>(WorkItemCapabilities.Create, (r, _) => {
+            Grant<CreateWorkItemRequest, WorkItem>(WorkItemCapabilities.Create, (r, _) => {
                 if (!_tickets.TryGetValue(r.IdempotencyKey, out var ticket)) {
                     CreatedTickets++; _tickets[r.IdempotencyKey] = ticket = Empty<WorkItem>() with { Id = Guid.NewGuid(), Planning = r.Planning, TypeKey = r.TypeKey };
                 }
                 return Task.FromResult(ticket);
             });
-            Runtime.RegisterCapability<ConfigureWorkDeliveryPlanRequest, WorkDeliveryPlanResponse>(WorkDeliveryCapabilities.Configure, (r, _) => {
+            Grant<ConfigureWorkDeliveryPlanRequest, WorkDeliveryPlanResponse>(WorkDeliveryCapabilities.Configure, (r, _) => {
                 if (Plans.Count > 0) return Task.FromResult(Plans[0]);
                 ConfiguredPlans++;
                 var workflow = Assert.Single(r.TicketWorkflows);
@@ -293,14 +338,14 @@ public sealed class SprintDeliveryPreparationTests
                         workflow.Steps.Select(x => x.Assignment).ToArray()) { TicketWorkflow = workflow }] };
                 Plans.Add(plan); Lose("configure"); return Task.FromResult(plan);
             });
-            Runtime.RegisterCapability<FinalizeWorkItemDeliveryRequest, WorkItem>(WorkItemCapabilities.FinalizeDelivery, (r, _) => {
+            Grant<FinalizeWorkItemDeliveryRequest, WorkItem>(WorkItemCapabilities.FinalizeDelivery, (r, _) => {
                 if (DenyFinalize) throw new PlatformCapabilityException(WorkItemCapabilities.FinalizeDelivery, PlatformCapabilityErrorCode.Denied, "Revoked");
                 var index = Items.FindIndex(x => x.Id == r.ItemId); Assert.Equal(Items[index].Revision, r.ExpectedRevision);
                 Finalizations.Add(r); Items[index] = Items[index] with { Delivery = r.Delivery, Revision = r.ExpectedRevision + 1 };
                 Lose("finalize"); return Task.FromResult(Items[index]);
             });
-            Runtime.RegisterCapability<StartWorkSprintExecutionRequest, WorkSprintExecutionResponse>(WorkOrchestrationCapabilities.Start, (_, _) => { Starts++; return Task.FromResult(Empty<WorkSprintExecutionResponse>()); });
-            Runtime.RegisterCapability<ControlWorkDeliveryPlanRequest, WorkDeliveryPlanResponse>(WorkDeliveryCapabilities.Control, (r, _) => {
+            Grant<StartWorkSprintExecutionRequest, WorkSprintExecutionResponse>(WorkOrchestrationCapabilities.Start, (_, _) => { Starts++; return Task.FromResult(Empty<WorkSprintExecutionResponse>()); });
+            Grant<ControlWorkDeliveryPlanRequest, WorkDeliveryPlanResponse>(WorkDeliveryCapabilities.Control, (r, _) => {
                 Assert.Equal("activate", r.Action); Assert.All(Items.Where(x => x.SprintId == Sprint.Id), x => Assert.NotNull(x.Delivery));
                 Activations++; Plans[0] = Plans[0] with { Status = "Active", Revision = Plans[0].Revision + 1 };
                 Lose("activate"); return Task.FromResult(Plans[0]);
