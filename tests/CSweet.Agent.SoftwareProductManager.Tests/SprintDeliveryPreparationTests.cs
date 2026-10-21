@@ -8,6 +8,73 @@ namespace CSweet.Agent.SoftwareProductManager.Tests;
 
 public sealed class SprintDeliveryPreparationTests
 {
+    [Fact]
+    public async Task Chat_tools_exclude_platform_hidden_operations_and_keep_exact_visible_binding_checks()
+    {
+        var runtime = new AgentTestRuntime();
+        foreach (var capability in ProductManagerAgent.ProductModelCapabilities)
+            runtime.RegisterCapability<JsonElement, JsonElement>(capability, (r, _) => Task.FromResult(r), modelVisible: true);
+        foreach (var capability in new[] { WorkItemCapabilities.RevisePlanning, WorkItemCapabilities.FinalizeDelivery,
+            CommunicationCapabilities.ChatRead, CommunicationCapabilities.CoordinationRead,
+            PlatformCapabilities.ProjectAssignmentRead, PlatformCapabilities.WorkstreamRead })
+            runtime.RegisterCapability<JsonElement, JsonElement>(capability, (r, _) => Task.FromResult(r), modelVisible: false);
+        var tools = await ProductManagerAgent.ProductModelToolsAsync(runtime.CreateContext(), default);
+        Assert.Equal(ProductManagerAgent.ProductModelCapabilities.Length, tools.Count);
+        // Reproduce the former setup failure rather than weakening platform visibility.
+        await Assert.ThrowsAsync<PlatformCapabilityException>(() => runtime.CreateContext().GetModelToolsAsync(
+            ProductManagerAgent.ProductModelCapabilities.Concat([WorkItemCapabilities.RevisePlanning]).ToArray()));
+        runtime.RegisterCapability<JsonElement, JsonElement>(WorkItemCapabilities.Read, (r, _) => Task.FromResult(r), modelVisible: false);
+        await Assert.ThrowsAsync<PlatformCapabilityException>(() => ProductManagerAgent.ProductModelToolsAsync(runtime.CreateContext(), default));
+    }
+
+    [Fact]
+    public async Task Adopts_only_the_retained_brief_and_exact_stage_principals_then_prepares_delivery()
+    {
+        var f = new Fixture(); var original = f.Items[0];
+        var brief = new SoftwareDevelopmentBrief(f.Repositories[0].RepositoryId, "software-development-polyglot-v1",
+            original.Planning!.Requirements, original.Planning.AcceptanceCriteria, original.Planning.Constraints);
+        f.Items[0] = original with { Planning = null, Development = brief,
+            StageAssignments = original.StageAssignments.Select(x => x.PrincipalKind == "AgentInstallation" ? x with { OrganizationUserId = null } : x).ToArray() };
+        var result = await LegacyBriefPlanning.AdoptAsync(f.Board.Id, original.Id, original.Revision, f.Context, default);
+        Assert.Equal(brief.Requirements, result.Planning!.Requirements);
+        Assert.Equal(brief.AcceptanceCriteria, result.Planning.AcceptanceCriteria);
+        Assert.Equal(brief.Constraints, result.Planning.Constraints);
+        Assert.Equal(original.AccountableOrganizationUserId, result.AccountableOrganizationUserId);
+        Assert.Equal(original.StageAssignments, result.StageAssignments);
+        Assert.Equal(1, f.PlanningWrites);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => LegacyBriefPlanning.AdoptAsync(f.Board.Id, original.Id, result.Revision, f.Context, default));
+        Assert.Equal(1, f.PlanningWrites);
+        Assert.Equal("Active", (await f.Prepare()).Status); Assert.Equal(0, f.Starts);
+    }
+
+    [Theory]
+    [InlineData("revision")]
+    [InlineData("manager")]
+    [InlineData("sprint")]
+    [InlineData("brief")]
+    [InlineData("quality-gate")]
+    [InlineData("principal")]
+    [InlineData("owner")]
+    public async Task Adoption_rejects_stale_or_incomplete_bindings_before_any_write(string scenario)
+    {
+        var f = new Fixture(); var original = f.Items[0];
+        f.Items[0] = original with { Planning = null, Development = new(f.Repositories[0].RepositoryId, "certified",
+            ["Retain scope"], ["Independent review passes"]) };
+        var revision = original.Revision;
+        switch (scenario)
+        {
+            case "revision": revision--; break;
+            case "manager": f.Board = f.Board with { ManagerOrganizationUserId = Guid.NewGuid() }; break;
+            case "sprint": f.Sprint = f.Sprint with { Status = "Active" }; break;
+            case "brief": f.Items[0] = f.Items[0] with { Development = null }; break;
+            case "quality-gate": f.Items[0] = f.Items[0] with { Development = f.Items[0].Development! with { QualityGateColumnId = Guid.NewGuid() } }; break;
+            case "principal": f.Items[0] = f.Items[0] with { StageAssignments = original.StageAssignments.Select(x => x.PrincipalKind == "AgentInstallation" ? x with { AgentInstallationId = Guid.NewGuid(), OrganizationUserId = null } : x).ToArray() }; break;
+            case "owner": f.Items[0] = f.Items[0] with { AccountableOrganizationUserId = Guid.NewGuid() }; break;
+        }
+        await Assert.ThrowsAsync<InvalidOperationException>(() => LegacyBriefPlanning.AdoptAsync(f.Board.Id, original.Id, revision, f.Context, default));
+        Assert.Equal(0, f.PlanningWrites); Assert.Equal(0, f.ConfiguredPlans); Assert.Equal(0, f.Starts);
+    }
+
     [Theory]
     [InlineData(null)]
     [InlineData(PlatformCapabilities.ProjectAssignmentRead)]
@@ -160,7 +227,7 @@ public sealed class SprintDeliveryPreparationTests
     public void Preparation_tools_do_not_expose_arbitrary_delivery_acceptance_or_transport()
     {
         var names = ProductManagerAgent.DeliveryTools(new Fixture().Context).Cast<AIFunction>().Select(x => x.Name).ToArray();
-        Assert.Equal(["prepare_sprint_delivery", "read_project_delivery", "read_ticket_discussion"], names);
+        Assert.Equal(["adopt_developer_brief", "prepare_sprint_delivery", "read_project_delivery", "read_ticket_discussion"], names);
     }
 
     [Fact]
@@ -266,7 +333,7 @@ public sealed class SprintDeliveryPreparationTests
         internal List<FinalizeWorkItemDeliveryRequest> Finalizations = [];
         internal Dictionary<string, AgentOperatingStateResponse> States = [];
         internal AgentRuntimeContext Context;
-        internal int CreatedTickets, ConfiguredPlans, Activations, Starts, PlanReads;
+        internal int CreatedTickets, ConfiguredPlans, Activations, Starts, PlanReads, PlanningWrites;
         internal string? LoseResponse;
         internal bool DenyFinalize;
         private readonly Dictionary<string, WorkItem> _tickets = [];
@@ -343,6 +410,14 @@ public sealed class SprintDeliveryPreparationTests
                 var index = Items.FindIndex(x => x.Id == r.ItemId); Assert.Equal(Items[index].Revision, r.ExpectedRevision);
                 Finalizations.Add(r); Items[index] = Items[index] with { Delivery = r.Delivery, Revision = r.ExpectedRevision + 1 };
                 Lose("finalize"); return Task.FromResult(Items[index]);
+            });
+            Grant<ReviseWorkItemPlanningRequest, WorkItem>(WorkItemCapabilities.RevisePlanning, (r, _) => {
+                var index = Items.FindIndex(x => x.Id == r.ItemId);
+                Assert.Equal(Items[index].Revision, r.ExpectedRevision); Assert.Equal(Items[index].PlanningRevision, r.ExpectedPlanningRevision);
+                PlanningWrites++;
+                Items[index] = Items[index] with { Planning = r.Planning, AccountableOrganizationUserId = r.AccountableOrganizationUserId,
+                    StageAssignments = r.StageAssignments!, Revision = r.ExpectedRevision + 1, PlanningRevision = r.ExpectedPlanningRevision + 1 };
+                return Task.FromResult(Items[index]);
             });
             Grant<StartWorkSprintExecutionRequest, WorkSprintExecutionResponse>(WorkOrchestrationCapabilities.Start, (_, _) => { Starts++; return Task.FromResult(Empty<WorkSprintExecutionResponse>()); });
             Grant<ControlWorkDeliveryPlanRequest, WorkDeliveryPlanResponse>(WorkDeliveryCapabilities.Control, (r, _) => {

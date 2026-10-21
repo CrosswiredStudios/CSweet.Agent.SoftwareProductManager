@@ -4390,34 +4390,9 @@ Do not claim that roles are approved, sourced, or hired, and do not invoke an ac
             new SessionStateMemoryPartitionResolver(memoryOptions),
             memoryOptions);
 
-        string[] productManagerModelCapabilities =
-        [
-            PlatformCapabilities.BusinessProfileRead,
-            PlatformCapabilities.OrganizationSnapshotRead,
-            PlatformCapabilities.TeamRosterRead,
-            WorkBoardCapabilities.Read,
-            WorkItemCapabilities.Read,
-            WorkItemCapabilities.ReadTypes,
-            WorkItemCapabilities.Create,
-            WorkItemCapabilities.RevisePlanning,
-            WorkItemCapabilities.Comment,
-            WorkItemCapabilities.Move,
-            WorkItemCapabilities.FinalizeDelivery,
-            WorkSprintCapabilities.Read,
-            WorkSprintCapabilities.Create,
-            WorkSprintCapabilities.ManageScope,
-            WorkSprintCapabilities.ReadReports,
-            WorkOrchestrationCapabilities.Read,
-            WorkOrchestrationCapabilities.Preflight,
-            WorkOrchestrationCapabilities.Start,
-            SourceControlCapabilities.TeamRepositoryOptions,
-            CommunicationCapabilities.ChatRead,
-            CommunicationCapabilities.CoordinationRead
-        ];
         List<AITool> tools = resourceChangeOnly || suppressPlatformTools
             ? []
-            : (await runtimeContext.GetModelToolsAsync(
-                productManagerModelCapabilities, cancellationToken)).ToList();
+            : (await ProductModelToolsAsync(runtimeContext, cancellationToken)).ToList();
         if (!resourceChangeOnly && !suppressPlatformTools)
             tools.AddRange(DeliveryTools(runtimeContext));
         tools.Add(AIFunctionFactory.Create(

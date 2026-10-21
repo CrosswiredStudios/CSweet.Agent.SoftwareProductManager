@@ -44,24 +44,7 @@ internal static class SprintDeliveryPreparation
         if (roster is null || roster.TeamId != teamId.ToString() ||
             !roster.Members.Any(x => x.EmployeeId == manager.ToString() && x.AgentInstallationId == installation && x.IsAvailable))
             throw new InvalidOperationException("The current manager and selected board must belong to the same available team roster.");
-        foreach (var task in tasks)
-        {
-            var author = task.StageAssignments.SingleOrDefault(x => x.StageKey is "development" or "specialist-execution");
-            if (author?.OrganizationUserId is null || !task.StageAssignments.Any(x => x.StageKey == "technical-review") ||
-                !task.StageAssignments.Any(x => x.StageKey == "quality"))
-                throw new InvalidOperationException("Code preparation requires an exact author and the existing independent technical and quality reviewers.");
-            foreach (var principal in task.StageAssignments.Where(x => x.PrincipalKind is "Human" or "AgentInstallation"))
-            {
-                var member = roster.Members.SingleOrDefault(x => x.EmployeeId == principal.OrganizationUserId?.ToString() && x.IsAvailable);
-                if (member is null || (principal.PrincipalKind == "Human"
-                        ? member.EmployeeType != "Human" || principal.AgentInstallationId is not null
-                        : member.AgentInstallationId != principal.AgentInstallationId || !principal.AgentInstallationId.HasValue ||
-                          !member.EffectiveCapabilities.Contains(WorkManagementCapabilityNames.ExecutionRun)))
-                    throw new InvalidOperationException("Retain an exact available team employee and installation for every assigned stage; resolve staffing before preparing a plan.");
-                if (principal.StageKey is "technical-review" or "quality" && principal.OrganizationUserId == author.OrganizationUserId)
-                    throw new InvalidOperationException("The implementation author cannot perform independent technical review or quality review.");
-            }
-        }
+        foreach (var task in tasks) ValidateStageAssignments(task, roster);
         var options = await context.Platform.SourceControl.ListTeamRepositoryOptionsAsync(new(teamId), ct);
         var bindings = tasks.Where(x => x.Delivery is not null).Select(x => x.Delivery!.RepositoryId).Distinct().ToArray();
         var repository = bindings.Length == 1 ? options.SingleOrDefault(x => x.RepositoryId == bindings[0]) :
@@ -158,5 +141,27 @@ internal static class SprintDeliveryPreparation
 
         Result Prepared() => new(plan.Id, workflowId, plan.Status, branch,
             "Delivery is prepared on its isolated sprint branch. The sprint remains Planned; its current preflight and explicit start are still required. No default-branch promotion or deployment is authorized.");
+    }
+
+    internal static void ValidateStageAssignments(WorkItem task, AgentTeamContext roster)
+    {
+        if (task.StageAssignments.Any(x => x.PrincipalKind is not ("Human" or "AgentInstallation")) ||
+            task.StageAssignments.GroupBy(x => x.StageKey).Any(x => x.Count() != 1))
+            throw new InvalidOperationException("Retain one exact supported principal per assigned stage.");
+        var author = task.StageAssignments.SingleOrDefault(x => x.StageKey is "development" or "specialist-execution");
+        if (author?.OrganizationUserId is null || !task.StageAssignments.Any(x => x.StageKey == "technical-review") ||
+            !task.StageAssignments.Any(x => x.StageKey == "quality"))
+            throw new InvalidOperationException("Code preparation requires an exact author and the existing independent technical and quality reviewers.");
+        foreach (var principal in task.StageAssignments)
+        {
+            var member = roster.Members.SingleOrDefault(x => x.EmployeeId == principal.OrganizationUserId?.ToString() && x.IsAvailable);
+            if (member is null || (principal.PrincipalKind == "Human"
+                    ? member.EmployeeType != "Human" || principal.AgentInstallationId is not null
+                    : member.AgentInstallationId != principal.AgentInstallationId || !principal.AgentInstallationId.HasValue ||
+                      !member.EffectiveCapabilities.Contains(WorkManagementCapabilityNames.ExecutionRun)))
+                throw new InvalidOperationException("Retain an exact available team employee and installation for every assigned stage; resolve staffing before preparing a plan.");
+            if (principal.StageKey is "technical-review" or "quality" && principal.OrganizationUserId == author.OrganizationUserId)
+                throw new InvalidOperationException("The implementation author cannot perform independent technical review or quality review.");
+        }
     }
 }

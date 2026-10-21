@@ -6,6 +6,20 @@ namespace CSweet.Agent.SoftwareProductManager;
 
 public sealed partial class ProductManagerAgent
 {
+    internal static readonly string[] ProductModelCapabilities =
+    [
+        PlatformCapabilities.BusinessProfileRead, PlatformCapabilities.OrganizationSnapshotRead,
+        PlatformCapabilities.TeamRosterRead, WorkBoardCapabilities.Read, WorkItemCapabilities.Read,
+        WorkItemCapabilities.ReadTypes, WorkItemCapabilities.Create, WorkItemCapabilities.Comment,
+        WorkItemCapabilities.Move, WorkSprintCapabilities.Read, WorkSprintCapabilities.Create,
+        WorkSprintCapabilities.ManageScope, WorkSprintCapabilities.ReadReports,
+        WorkOrchestrationCapabilities.Read, WorkOrchestrationCapabilities.Preflight,
+        WorkOrchestrationCapabilities.Start, SourceControlCapabilities.TeamRepositoryOptions
+    ];
+
+    internal static Task<IReadOnlyList<AITool>> ProductModelToolsAsync(AgentRuntimeContext context, CancellationToken ct) =>
+        context.GetModelToolsAsync(ProductModelCapabilities, ct);
+
     internal static async Task<bool> ReconcileAssignedProjectAsync(AgentRuntimeContext context, CancellationToken ct)
     {
         if (context.Identity?.AssignedProject is not { BoardId: { } boardId } assignment) return false;
@@ -35,6 +49,9 @@ public sealed partial class ProductManagerAgent
 
     internal static IReadOnlyList<AITool> DeliveryTools(AgentRuntimeContext context) =>
     [
+        AIFunctionFactory.Create((Guid boardId, Guid itemId, long expectedRevision, CancellationToken ct) =>
+            LegacyBriefPlanning.AdoptAsync(boardId, itemId, expectedRevision, context, ct), "adopt_developer_brief",
+            "Adopt this Ready, Planned-sprint ticket's existing developer brief as accepted planning, preserving its exact requirements, criteria, constraints, owner and stage principals. Only fills a missing agent employee identity from the exact retained installation in the current roster. You must currently manage the board and project. Does not edit existing planning or waive review. Read the current ticket first; after a lost response re-read it before continuing. Use prepare_sprint_delivery after the accepted planning is present."),
         AIFunctionFactory.Create((Guid boardId, Guid sprintId, CancellationToken ct) =>
             SprintDeliveryPreparation.PrepareAsync(boardId, sprintId, context, ct), "prepare_sprint_delivery",
             "Prepare the selected Planned code sprint on a board and project you currently manage. Requires accepted planning and exact existing author/reviewer assignments. Reuses only an unambiguous approved repository. Retains scope, prepares an isolated branch and activates the delivery plan. Does not start the sprint, promote to the default branch, approve review or deploy. Report a blocker if preparation fails; never claim success without its returned receipt."),
