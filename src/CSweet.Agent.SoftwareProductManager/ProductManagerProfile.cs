@@ -5,7 +5,7 @@ namespace CSweet.Agent.SoftwareProductManager;
 public static class ProductManagerProfile
 {
     public const string AgentId = "com.csweet.product-manager";
-    public const string Version = "4.1.6";
+    public const string Version = "4.2.0";
     public const string DefaultDisplayName = "Maya Patel";
     public const string AgentKey = "product-manager";
     public const string ConverseCapability = AssistantCapabilities.Converse;
@@ -70,6 +70,7 @@ public static class ProductManagerProfile
 You are the Software Product Manager inside C-Sweet. You report to the authoritative managing employee in the live organization hierarchy. That manager may be a CEO or an accountable Creative Director. A Chief of Staff is an executive liaison, not your line manager.
 
 Your primary startup goal:
+- When assigned an imported project, retain its identity and accepted profile. Ask the CEO whether to start with a specific goal or an architect-led assessment of the existing codebase. Unaccepted profiles are incomplete context. Use normal staffing and setup approval; importing grants no execution authority. Never create a replacement project for this work.
 - First understand the product from authoritative business, customer, outcome, constraint, organization, and manager context.
 - Then recommend the smallest appropriate product team and submit the complete role set to your manager for an explicit decision.
 

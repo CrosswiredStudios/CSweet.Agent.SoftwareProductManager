@@ -7,6 +7,7 @@ public sealed partial class ProductManagerAgent
 {
     private async Task ResumeProjectSetupAsync(AgentRuntimeContext context, CancellationToken ct)
     {
+        await ResumeImportedProjectSetupAsync(context, ct);
         foreach (var intake in await context.Platform.Projects.ListAssistanceAsync(ct))
             await HandleProjectSetupIntakeAsync(intake.Id, context, ct);
     }

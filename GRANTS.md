@@ -2,10 +2,10 @@
 
 This document is the human-readable grant catalog for the C-Sweet Software Product Manager agent. The source
 of truth for installation authorization remains [`csweet-plugin.json`](csweet-plugin.json). This
-catalog was last verified against package version `4.1.6` and manifest protocol `2.0`.
+catalog was last verified against package version `4.2.0` and manifest protocol `2.0`.
 
 Serialized capability names are sourced from the authoritative `CapabilityCatalog` in
-`CSweet.Agent.SDK` 5.0.2; manifest-audit tests reject names missing from that catalog.
+`CSweet.Agent.SDK` 5.9.0; manifest-audit tests reject names missing from that catalog.
 
 ## How to read this catalog
 
@@ -174,3 +174,7 @@ lead-authored team plan. The CEO retains organization, hiring, spending, and app
 - Board creation occurs only after manager approval and does not grant candidate or hiring authority.
 - Memory is supporting context and cannot override manager direction or current platform records.
 - Any manifest change must update this catalog and its manifest-version marker in the same change.
+
+## Imported-project recovery
+
+`com.csweet.workstream.changed.v1` wakes recovery of the current assigned imported project. The agent re-reads the authorized organization snapshot and approved staffing roster; the event carries no setup or execution grant. Attention review provides bounded recovery after missed or duplicate wakes.

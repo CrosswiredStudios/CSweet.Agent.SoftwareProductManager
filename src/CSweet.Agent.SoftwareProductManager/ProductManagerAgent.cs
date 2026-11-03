@@ -2407,6 +2407,11 @@ Keep all tickets in Backlog and leave dates, estimates, repository details, and 
         AgentRuntimeContext context,
         CancellationToken cancellationToken)
     {
+        if (message.EventType == "com.csweet.workstream.changed.v1")
+        {
+            await ResumeImportedProjectSetupAsync(context, cancellationToken);
+            return;
+        }
         if (message.EventType == ProductTicketDiscussion.Changed)
         {
             ProductTicketDiscussion.Hint? hint;

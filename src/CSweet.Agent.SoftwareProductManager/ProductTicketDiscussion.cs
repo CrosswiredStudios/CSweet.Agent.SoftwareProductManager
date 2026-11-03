@@ -96,8 +96,10 @@ internal static class ProductTicketDiscussion
             var items = (await context.Platform.Work.ReadBoardAsync(board, ct)).Items
                 .Where(x => x.Status is not ("Done" or "Completed" or "Cancelled")).OrderBy(x => x.Id).ToArray();
             if (items.Length == 0) return;
-            var cursor = await context.Platform.ReadOperatingStateAsync<int>("product-discussion-cursor", ct);
-            var start = (int)(Math.Abs((long)(cursor?.Payload ?? 0)) % items.Length);
+            var cursor = await context.Platform.ReadOperatingStateAsync<JsonElement>("product-discussion-cursor", ct);
+            var position = cursor?.Payload is { } payload && payload.ValueKind == JsonValueKind.Object && payload.TryGetProperty("next", out var saved) ? saved.GetInt32() :
+                cursor?.Payload is { ValueKind: JsonValueKind.Number } legacy ? legacy.GetInt32() : 0;
+            var start = (int)(Math.Abs((long)position) % items.Length);
             for (var offset = 0; offset < Math.Min(5, items.Length); offset++)
             {
                 var item = items[(start + offset) % items.Length];
@@ -110,9 +112,9 @@ internal static class ProductTicketDiscussion
             {
                 board, next, items = items.Select(x => new { x.Id, x.Revision })
             }, Json)));
-            await context.Platform.WriteOperatingStateAsync(new WriteAgentOperatingStateRequest<int>("product-discussion-cursor",
+            await context.Platform.WriteOperatingStateAsync(new WriteAgentOperatingStateRequest<object>("product-discussion-cursor",
                 "product-manager.discussion-cursor.v1", 1, "Active", new Dictionary<string, string>(), [], fingerprint, [], Guid.NewGuid(),
-                next, cursor?.Revision,
+                new { next }, cursor?.Revision,
                 $"pm-discussion-cursor:{cursor?.Revision ?? 0}:{start}:{items.Length}"), ct);
         }
         catch (PlatformCapabilityException error) when (error.Code is PlatformCapabilityErrorCode.Denied or PlatformCapabilityErrorCode.NotFound)

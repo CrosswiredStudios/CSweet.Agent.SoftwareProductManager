@@ -1,7 +1,7 @@
 # C-Sweet Software Product Manager
 
-First-party Software Product Manager agent for C-Sweet, built on `CSweet.Agent.SDK` 5.0.2 and manifest protocol v2.
-The agent package version is `4.1.6`.
+First-party Software Product Manager agent for C-Sweet, built on `CSweet.Agent.SDK` 5.9.0 and manifest protocol v2.
+The agent package version is `4.2.0`.
 
 The configured-model lifecycle matrix is defined in
 [`evals/product-manager-lifecycle.v1.json`](evals/product-manager-lifecycle.v1.json) and must run
@@ -109,7 +109,7 @@ dotnet build CSweet.Agent.SoftwareProductManager.slnx
 dotnet test CSweet.Agent.SoftwareProductManager.slnx
 ```
 
-Requirements are .NET 10, `CSweet.Agent.SDK` 5.0.2, `CSweet.Memory`, an approved protocol-v2 installation, an active managing employee, and the grants in [GRANTS.md](GRANTS.md).
+Requirements are .NET 10, `CSweet.Agent.SDK` 5.9.0, `CSweet.Memory`, an approved protocol-v2 installation, an active managing employee, and the grants in [GRANTS.md](GRANTS.md).
 
 ## SDK 5.0.2 authoring contract
 
@@ -168,3 +168,7 @@ Execution uses one `work.execution.run` capability and `WorkExecutionAssignment`
 This release uses SDK 5.0.2 `ManagerIncidentCoordinator` for evidence-based incident reports and human-selected fixes. The shared SDK dispatcher runs before this agent's specialist intake, coordinates authorized recovery or delegation, and preserves required approvals. The incident presentation/update and resolution/read grants plus `com.csweet.management.incident.owner-report-requested.v1` allow existing open incidents to receive refreshed reports. Apply the platform migration before upgrading.
 
 Activation defaults to OnDemand. Durable messages, assignments, scheduled duties and attention reviews wake the agent; idle runtimes release their Office slot. Attention wakes require the platform scheduler that supports sleeping OnDemand installations. Existing installations retain their selected activation mode until their schedule is updated.
+
+## Existing project onboarding
+
+Discover the assigned imported software project and retain its project/repository identity. Use the normal CEO direction, staffing and reviewed setup process to adopt it after required roles are available. Recover on project-change hints and attention reviews. Preserve schema-valid discussion cursors with compatibility for legacy scalar cursors.

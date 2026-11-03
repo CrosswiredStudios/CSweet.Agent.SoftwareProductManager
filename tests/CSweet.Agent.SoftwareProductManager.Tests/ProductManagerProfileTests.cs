@@ -233,7 +233,7 @@ public sealed class ProductManagerProfileTests
             Assert.False(capability.GetProperty("outputSchema").GetProperty("additionalProperties").GetBoolean());
         });
         Assert.Equal(
-            [WorkDeliveryCapabilities.Changed, ProjectHealthEvents.ReviewDue, ProjectHealthEvents.IncidentChanged, "com.csweet.calendar.reminder-due.v1",
+            ["com.csweet.workstream.changed.v1", WorkDeliveryCapabilities.Changed, ProjectHealthEvents.ReviewDue, ProjectHealthEvents.IncidentChanged, "com.csweet.calendar.reminder-due.v1",
                 PersonalTodoEvents.Available,
                 ArtifactEvents.AccessDecision,
                 CommunicationEvents.MessageMentioned,
@@ -270,7 +270,7 @@ public sealed class ProductManagerProfileTests
             "src",
             "CSweet.Agent.SoftwareProductManager",
             "CSweet.Agent.SoftwareProductManager.csproj"));
-        Assert.Contains("CSweet.Agent.SDK\" Version=\"5.0.2", project, StringComparison.Ordinal);
+        Assert.Contains("CSweet.Agent.SDK\" Version=\"5.9.0", project, StringComparison.Ordinal);
         Assert.Contains("<ProjectReference", project, StringComparison.Ordinal);
         Assert.Contains($"<Version>{ProductManagerProfile.Version}</Version>", project, StringComparison.Ordinal);
     }

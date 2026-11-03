@@ -16,7 +16,7 @@
   },
   "id": "com.csweet.product-manager",
   "name": "Maya Patel",
-  "version": "4.1.6",
+  "version": "4.2.0",
   "publisher": {
     "id": "com.csweet",
     "name": "C-Sweet"
@@ -1968,6 +1968,7 @@
   ],
   "events": {
     "subscribes": [
+      "com.csweet.workstream.changed.v1",
       "com.csweet.work-delivery.changed.v1",
       "com.csweet.project-health.review-due.v1",
       "com.csweet.management.incident.changed.v1",
