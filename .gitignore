@@ -418,3 +418,6 @@ FodyWeavers.xsd
 !/releases/
 /releases/*
 !/releases/*.md
+
+# Temporary CI dependency feeds, validation outputs and Python bytecode.
+/.artifacts/
